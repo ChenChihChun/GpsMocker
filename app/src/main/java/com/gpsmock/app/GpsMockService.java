@@ -138,7 +138,7 @@ public class GpsMockService extends Service {
                 startLat, startLng, endLat, endLng, distance / 1000, durationMs / 60000, followRoads ? "yes" : "no"));
 
         if (!setupMockProvider()) {
-            sLastError = "Please select this app as Mock Location App in Developer Options";
+            sLastError = "請在「設定 > 開發者選項 > 選取模擬位置應用程式」中選擇 GPS 模擬器";
             Log.e(TAG, "Cannot setup Mock Provider: " + sLastError);
             stopSelf();
             return START_NOT_STICKY;
@@ -433,9 +433,9 @@ public class GpsMockService extends Service {
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "GPS Mocker",
+                CHANNEL_ID, "GPS 模擬器",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("GPS Mock Location Service");
+        channel.setDescription("GPS 位置模擬服務");
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
     }
 
@@ -452,20 +452,20 @@ public class GpsMockService extends Service {
         int percent = (int) (progress * 100);
         String statusText;
         if (hasArrived) {
-            statusText = String.format("Location: %.4f, %.4f | Arrived", lat, lng);
+            statusText = String.format("位置: %.4f, %.4f | 已到達目的地", lat, lng);
         } else {
             long remainingMs = (long) ((1.0 - progress) * durationMs);
-            statusText = String.format("Location: %.4f, %.4f | %s remaining", lat, lng, formatDuration(remainingMs));
+            statusText = String.format("位置: %.4f, %.4f | 剩餘 %s", lat, lng, formatDuration(remainingMs));
         }
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle(hasArrived ? "GPS Mock - Arrived" : String.format("GPS Mocking %d%%", percent))
+                .setContentTitle(hasArrived ? "GPS 模擬 - 已到達" : String.format("GPS 模擬中 %d%%", percent))
                 .setContentText(statusText)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setOngoing(true)
                 .setProgress(100, percent, false)
                 .setContentIntent(openPending)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPending)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPending)
                 .build();
     }
 
@@ -479,9 +479,9 @@ public class GpsMockService extends Service {
         long minutes = seconds / 60;
         seconds = seconds % 60;
         if (minutes > 0) {
-            return String.format("%dm %ds", minutes, seconds);
+            return String.format("%d分%d秒", minutes, seconds);
         }
-        return String.format("%ds", seconds);
+        return String.format("%d秒", seconds);
     }
 
     public static boolean isRunning() {
