@@ -12,6 +12,8 @@ import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,6 +26,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.CheckBox;
 import android.widget.TextView;
@@ -34,6 +37,16 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.List;
 import java.util.Locale;
 
@@ -41,6 +54,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
     private static final String TAG = "GpsMocker";
     private static final int PERMISSION_LOCATION = 1001;
+    private static final String GITHUB_REPO = "ChenChihChun/GpsMocker";
 
     private GpsMockDbHelper dbHelper;
     private LocationManager locationManager;
@@ -362,6 +376,23 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         presetsContainer.setOrientation(LinearLayout.VERTICAL);
         content.addView(presetsContainer);
 
+        Button updateBtn = UIHelper.smallButton(this, "檢查更新", UIHelper.ACCENT_BLUE);
+        LinearLayout.LayoutParams updLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 36));
+        updLp.setMargins(0, UIHelper.dp(this, 16), 0, 0);
+        updLp.gravity = Gravity.CENTER_HORIZONTAL;
+        updateBtn.setLayoutParams(updLp);
+        updateBtn.setOnClickListener(v -> checkForUpdate(true));
+        content.addView(updateBtn);
+
+        TextView verText = new TextView(this);
+        verText.setText("版本 v" + getCurrentVersionName());
+        verText.setTextSize(11);
+        verText.setTextColor(UIHelper.TEXT_HINT);
+        verText.setGravity(Gravity.CENTER);
+        verText.setPadding(0, UIHelper.dp(this, 6), 0, UIHelper.dp(this, 8));
+        content.addView(verText);
+
         scrollView.addView(content);
         simTabView = scrollView;
 
@@ -396,6 +427,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         loadFlowerPots();
         renderWaypoints();
         checkAndRequestPermission();
+
+        if (savedInstanceState == null) {
+            checkForUpdate(false);
+        }
     }
 
     private Button tabButton(String text) {
@@ -1289,5 +1324,228 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
         }
         b.show();
+    }
+
+    // ===================== 自主更新（GitHub Release） =====================
+
+    private String getCurrentVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "0";
+        }
+    }
+
+    /** 從 tag 取出純版本號：去掉開頭 v、去掉 '-' 之後的後綴（如 v1.1-c2 -> 1.1）。 */
+    private static String parseVersion(String tag) {
+        if (tag == null) return "0";
+        String t = tag.trim();
+        if (t.startsWith("v") || t.startsWith("V")) {
+            t = t.substring(1);
+        }
+        int dash = t.indexOf('-');
+        if (dash >= 0) {
+            t = t.substring(0, dash);
+        }
+        return t.isEmpty() ? "0" : t;
+    }
+
+    private static int compareVersions(String a, String b) {
+        String[] pa = a.split("\\.");
+        String[] pb = b.split("\\.");
+        int n = Math.max(pa.length, pb.length);
+        for (int i = 0; i < n; i++) {
+            int va = i < pa.length ? safeInt(pa[i]) : 0;
+            int vb = i < pb.length ? safeInt(pb[i]) : 0;
+            if (va != vb) {
+                return Integer.compare(va, vb);
+            }
+        }
+        return 0;
+    }
+
+    private static int safeInt(String s) {
+        try {
+            return Integer.parseInt(s.replaceAll("[^0-9]", ""));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private void checkForUpdate(boolean manual) {
+        if (manual) {
+            Toast.makeText(this, "檢查更新中...", Toast.LENGTH_SHORT).show();
+        }
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL("https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest");
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestProperty("User-Agent", "GpsMocker-Android");
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+
+                if (conn.getResponseCode() != 200) {
+                    if (manual) {
+                        runOnUiThread(() -> Toast.makeText(this, "檢查更新失敗", Toast.LENGTH_SHORT).show());
+                    }
+                    return;
+                }
+
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                }
+
+                JSONObject json = new JSONObject(sb.toString());
+                String latest = parseVersion(json.optString("tag_name"));
+                String current = getCurrentVersionName();
+
+                String apkUrl = null;
+                JSONArray assets = json.optJSONArray("assets");
+                if (assets != null) {
+                    for (int i = 0; i < assets.length(); i++) {
+                        JSONObject asset = assets.getJSONObject(i);
+                        if (asset.optString("name").endsWith(".apk")) {
+                            apkUrl = asset.optString("browser_download_url");
+                            break;
+                        }
+                    }
+                }
+
+                final String fApkUrl = apkUrl;
+                if (compareVersions(latest, current) > 0 && fApkUrl != null) {
+                    runOnUiThread(() -> showUpdateDialog(latest, current, fApkUrl));
+                } else if (manual) {
+                    runOnUiThread(() -> Toast.makeText(this, "已是最新版本 (v" + current + ")", Toast.LENGTH_SHORT).show());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Update check failed: " + e.getMessage());
+                if (manual) {
+                    runOnUiThread(() -> Toast.makeText(this, "檢查更新失敗: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private void showUpdateDialog(String latest, String current, String apkUrl) {
+        new AlertDialog.Builder(this)
+                .setTitle("發現新版本")
+                .setMessage("最新版本: v" + latest + "\n目前版本: v" + current + "\n\n是否下載並安裝？")
+                .setPositiveButton("下載並安裝", (d, w) -> downloadAndInstall(apkUrl))
+                .setNegativeButton("稍後", null)
+                .show();
+    }
+
+    private void downloadAndInstall(String apkUrl) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("需要安裝權限")
+                    .setMessage("請允許本 App 安裝未知來源應用，然後再按一次「檢查更新」。")
+                    .setPositiveButton("前往設定", (d, w) -> {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:" + getPackageName())));
+                        } catch (Exception e) {
+                            Toast.makeText(this, "無法開啟設定", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+
+        TextView pct = new TextView(this);
+        int m = UIHelper.dp(this, 16);
+        pct.setPadding(m, UIHelper.dp(this, 8), m, 0);
+        pct.setText("下載中... 0%");
+
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        barLp.setMargins(m, 0, m, 0);
+        bar.setLayoutParams(barLp);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(pct);
+        box.addView(bar);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("下載更新")
+                .setView(box)
+                .setCancelable(false)
+                .create();
+        dlg.show();
+
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(apkUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestProperty("User-Agent", "GpsMocker-Android");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(30000);
+                conn.setInstanceFollowRedirects(true);
+                conn.connect();
+
+                int total = conn.getContentLength();
+                File outFile = new File(getExternalFilesDir(null), "update.apk");
+                try (InputStream in = conn.getInputStream();
+                     FileOutputStream out = new FileOutputStream(outFile)) {
+                    byte[] buf = new byte[8192];
+                    int read;
+                    long sum = 0;
+                    while ((read = in.read(buf)) != -1) {
+                        out.write(buf, 0, read);
+                        sum += read;
+                        if (total > 0) {
+                            int pctVal = (int) (sum * 100 / total);
+                            runOnUiThread(() -> {
+                                bar.setProgress(pctVal);
+                                pct.setText("下載中... " + pctVal + "%");
+                            });
+                        }
+                    }
+                }
+                runOnUiThread(() -> {
+                    dlg.dismiss();
+                    installApk(outFile);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Download failed: " + e.getMessage());
+                runOnUiThread(() -> {
+                    dlg.dismiss();
+                    Toast.makeText(this, "下載失敗: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private void installApk(File file) {
+        try {
+            Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", file);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Install failed: " + e.getMessage());
+            Toast.makeText(this, "安裝失敗: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 }

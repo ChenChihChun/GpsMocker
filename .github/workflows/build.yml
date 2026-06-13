@@ -67,7 +67,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.name }}-c${{ steps.version.outputs.code }}
+          tag_name: v${{ steps.version.outputs.name }}
           name: GPS Mocker v${{ steps.version.outputs.name }}
           body: |
             **Version**: v${{ steps.version.outputs.name }} (code ${{ steps.version.outputs.code }})
