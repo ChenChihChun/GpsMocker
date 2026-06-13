@@ -54,6 +54,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     private TextView destResultText;
     private Spinner durationSpinner;
     private CheckBox followRoadsCheck;
+    private CheckBox fixedPointCheck;
     private Button startStopBtn;
     private LinearLayout presetsContainer;
     private TextView statusText;
@@ -87,7 +88,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 double lat = GpsMockService.getCurrentLat();
                 double lng = GpsMockService.getCurrentLng();
                 int progress = (int) (GpsMockService.getProgress() * 100);
-                if (GpsMockService.hasArrived()) {
+                if (GpsMockService.isFixedPoint()) {
+                    mockStatusText.setText(String.format("定點模擬中: %.4f, %.4f", lat, lng));
+                } else if (GpsMockService.hasArrived()) {
                     mockStatusText.setText(String.format("已到達: %.4f, %.4f", lat, lng));
                 } else {
                     mockStatusText.setText(String.format("模擬位置: %.4f, %.4f (%d%%)", lat, lng, progress));
@@ -101,14 +104,14 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         }
     };
 
-    private final long[] DURATION_VALUES = {
+    private static final long[] DURATION_VALUES = {
             10 * 60 * 1000,
             30 * 60 * 1000,
             60 * 60 * 1000,
             120 * 60 * 1000,
             -1,
     };
-    private final String[] DURATION_LABELS = {"10 分鐘", "30 分鐘", "1 小時", "2 小時", "自訂..."};
+    private static final String[] DURATION_LABELS = {"10 分鐘", "30 分鐘", "1 小時", "2 小時", "自訂..."};
     private long customDurationMs = 60 * 60 * 1000;
 
     @Override
@@ -225,11 +228,36 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         startResultText.setPadding(0, UIHelper.dp(this, 8), 0, 0);
         startCard.addView(startResultText);
 
+        Button saveStartBtn = UIHelper.smallButton(this, "儲存為預設", UIHelper.ACCENT_GREEN);
+        saveStartBtn.setOnClickListener(v -> {
+            if (!hasStartPoint) {
+                Toast.makeText(this, "請先設定起點", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            showSaveLocationDialog(startLat, startLng, startName);
+        });
+        LinearLayout.LayoutParams saveStartLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 36));
+        saveStartLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        saveStartBtn.setLayoutParams(saveStartLp);
+        startCard.addView(saveStartBtn);
+
         content.addView(startCard);
 
         // Destination card
         content.addView(UIHelper.sectionHeader(this, "目的地"));
         LinearLayout destCard = UIHelper.card(this);
+
+        fixedPointCheck = new CheckBox(this);
+        fixedPointCheck.setText("定點模擬（固定於起點，不移動）");
+        fixedPointCheck.setTextColor(UIHelper.TEXT_PRIMARY);
+        fixedPointCheck.setTextSize(14);
+        fixedPointCheck.setButtonTintList(android.content.res.ColorStateList.valueOf(UIHelper.ACCENT_GREEN));
+        LinearLayout.LayoutParams fixedLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        fixedLp.setMargins(0, 0, 0, UIHelper.dp(this, 4));
+        fixedPointCheck.setLayoutParams(fixedLp);
+        destCard.addView(fixedPointCheck);
 
         TextView destLabel = new TextView(this);
         destLabel.setText("輸入地點名稱:");
@@ -318,6 +346,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         saveLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
         savePresetBtn.setLayoutParams(saveLp);
         destCard.addView(savePresetBtn);
+
+        // 定點模擬勾選時隱藏目的地相關欄位（終點＝起點）
+        fixedPointCheck.setOnCheckedChangeListener((btn, isChecked) -> {
+            int vis = isChecked ? View.GONE : View.VISIBLE;
+            destLabel.setVisibility(vis);
+            searchRow.setVisibility(vis);
+            destResultText.setVisibility(vis);
+            durRow.setVisibility(vis);
+            followRoadsCheck.setVisibility(vis);
+            savePresetBtn.setVisibility(vis);
+        });
 
         content.addView(destCard);
 
@@ -597,6 +636,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         return sb.length() > 0 ? sb.toString() : String.format("%.4f, %.4f", address.getLatitude(), address.getLongitude());
     }
 
+    private void setStartPoint(double lat, double lng, String name) {
+        startLat = lat;
+        startLng = lng;
+        startName = name;
+        hasStartPoint = true;
+        useCurrentAsStart = false;
+        startInput.setText(name);
+        startResultText.setText(String.format("%s\n(%.6f, %.6f)", name, lat, lng));
+        startResultText.setTextColor(UIHelper.ACCENT_GREEN);
+    }
+
     private void setDestination(double lat, double lng, String name) {
         destLat = lat;
         destLng = lng;
@@ -631,26 +681,37 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             return;
         }
 
-        if (!hasDestination) {
-            Toast.makeText(this, "請先搜尋並選擇目的地", Toast.LENGTH_SHORT).show();
-            return;
+        boolean fixed = fixedPointCheck.isChecked();
+        double actualDestLat, actualDestLng;
+        if (fixed) {
+            actualDestLat = actualStartLat;
+            actualDestLng = actualStartLng;
+        } else {
+            if (!hasDestination) {
+                Toast.makeText(this, "請先搜尋並選擇目的地", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            actualDestLat = destLat;
+            actualDestLng = destLng;
         }
 
         int durationIdx = durationSpinner.getSelectedItemPosition();
         long duration = DURATION_VALUES[durationIdx] == -1 ? customDurationMs : DURATION_VALUES[durationIdx];
-        double distance = haversineDistance(actualStartLat, actualStartLng, destLat, destLng);
+        double distance = haversineDistance(actualStartLat, actualStartLng, actualDestLat, actualDestLng);
 
         String startDesc = hasStartPoint ? startName : "目前位置";
+        String destDesc = fixed ? "定點(同起點)" : destName;
         Log.i(TAG, String.format("Starting mock: %s -> %s, distance %.1fkm, duration %dmin",
-                startDesc, destName, distance / 1000, duration / 60000));
+                startDesc, destDesc, distance / 1000, duration / 60000));
 
         Intent intent = new Intent(this, GpsMockService.class);
         intent.putExtra(GpsMockService.EXTRA_START_LAT, actualStartLat);
         intent.putExtra(GpsMockService.EXTRA_START_LNG, actualStartLng);
-        intent.putExtra(GpsMockService.EXTRA_END_LAT, destLat);
-        intent.putExtra(GpsMockService.EXTRA_END_LNG, destLng);
+        intent.putExtra(GpsMockService.EXTRA_END_LAT, actualDestLat);
+        intent.putExtra(GpsMockService.EXTRA_END_LNG, actualDestLng);
         intent.putExtra(GpsMockService.EXTRA_DURATION_MS, duration);
-        intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, followRoadsCheck.isChecked());
+        intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, !fixed && followRoadsCheck.isChecked());
+        intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, fixed);
 
         startForegroundService(intent);
         Toast.makeText(this, "開始模擬位置", Toast.LENGTH_SHORT).show();
@@ -708,6 +769,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 .show();
     }
 
+    private LinearLayout.LayoutParams presetButtonParams(int leftMargin) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(leftMargin, 0, 0, 0);
+        return lp;
+    }
+
     private void loadPresets() {
         presetsContainer.removeAllViews();
         List<GpsMockDbHelper.Preset> presets = dbHelper.getAllPresets();
@@ -752,10 +820,18 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             info.addView(name);
             info.addView(coords);
 
-            Button useBtn = UIHelper.smallButton(this, "使用", UIHelper.ACCENT_BLUE);
-            useBtn.setOnClickListener(v -> setDestination(preset.lat, preset.lng, preset.name));
+            int btnGap = UIHelper.dp(this, 6);
 
-            Button delBtn = UIHelper.smallButton(this, "刪除", UIHelper.ACCENT_RED);
+            Button startBtn = UIHelper.smallButton(this, "起", UIHelper.ACCENT_GREEN);
+            startBtn.setLayoutParams(presetButtonParams(btnGap));
+            startBtn.setOnClickListener(v -> setStartPoint(preset.lat, preset.lng, preset.name));
+
+            Button endBtn = UIHelper.smallButton(this, "終", UIHelper.ACCENT_BLUE);
+            endBtn.setLayoutParams(presetButtonParams(btnGap));
+            endBtn.setOnClickListener(v -> setDestination(preset.lat, preset.lng, preset.name));
+
+            Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
+            delBtn.setLayoutParams(presetButtonParams(btnGap));
             delBtn.setOnClickListener(v -> {
                 new AlertDialog.Builder(this)
                         .setTitle("刪除預設")
@@ -770,7 +846,8 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
 
             row.addView(info);
-            row.addView(useBtn);
+            row.addView(startBtn);
+            row.addView(endBtn);
             row.addView(delBtn);
 
             presetsContainer.addView(row);
@@ -782,10 +859,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             Toast.makeText(this, "請先搜尋並選擇目的地", Toast.LENGTH_SHORT).show();
             return;
         }
+        showSaveLocationDialog(destLat, destLng, destName);
+    }
 
+    private void showSaveLocationDialog(double lat, double lng, String defaultName) {
         EditText nameInput = new EditText(this);
         nameInput.setHint("預設名稱");
-        nameInput.setText(destName);
+        nameInput.setText(defaultName);
 
         new AlertDialog.Builder(this)
                 .setTitle("儲存預設")
@@ -793,9 +873,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 .setPositiveButton("儲存", (d, w) -> {
                     String name = nameInput.getText().toString().trim();
                     if (name.isEmpty()) {
-                        name = String.format("%.2f, %.2f", destLat, destLng);
+                        name = String.format("%.2f, %.2f", lat, lng);
                     }
-                    dbHelper.insertPreset(name, destLat, destLng);
+                    dbHelper.insertPreset(name, lat, lng);
                     Log.i(TAG, "Saved preset: " + name);
                     loadPresets();
                 })

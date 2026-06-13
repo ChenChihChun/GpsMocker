@@ -40,6 +40,7 @@ public class GpsMockService extends Service {
     public static final String EXTRA_END_LNG = "end_lng";
     public static final String EXTRA_DURATION_MS = "duration_ms";
     public static final String EXTRA_FOLLOW_ROADS = "follow_roads";
+    public static final String EXTRA_FIXED_POINT = "fixed_point";
 
     public static final String ACTION_STOP = "com.gpsmock.app.GPS_MOCK_STOP";
 
@@ -54,6 +55,7 @@ public class GpsMockService extends Service {
     private static volatile double sCurrentLng = 0;
     private static volatile double sProgress = 0;
     private static volatile String sLastError = null;
+    private static volatile boolean sFixedPoint = false;
 
     private LocationManager locationManager;
     private Handler handler;
@@ -64,6 +66,7 @@ public class GpsMockService extends Service {
     private long durationMs;
     private long startTimeMs;
     private boolean followRoads;
+    private boolean fixedPoint;
 
     private List<double[]> routePoints = new ArrayList<>();
     private double[] cumulativeDistances;
@@ -73,6 +76,16 @@ public class GpsMockService extends Service {
         @Override
         public void run() {
             if (!sIsRunning) return;
+
+            if (fixedPoint) {
+                sCurrentLat = startLat;
+                sCurrentLng = startLng;
+                sProgress = 0;
+                setMockLocation(startLat, startLng, 0);
+                updateNotification(0, startLat, startLng);
+                handler.postDelayed(this, UPDATE_INTERVAL_MS);
+                return;
+            }
 
             long elapsed = System.currentTimeMillis() - startTimeMs;
             double fraction = Math.min(1.0, (double) elapsed / durationMs);
@@ -132,6 +145,10 @@ public class GpsMockService extends Service {
         endLng = intent.getDoubleExtra(EXTRA_END_LNG, 0);
         durationMs = intent.getLongExtra(EXTRA_DURATION_MS, 600_000);
         followRoads = intent.getBooleanExtra(EXTRA_FOLLOW_ROADS, false);
+        fixedPoint = intent.getBooleanExtra(EXTRA_FIXED_POINT, false);
+        if (fixedPoint) {
+            followRoads = false;
+        }
 
         double distance = haversineDistance(startLat, startLng, endLat, endLng);
         Log.i(TAG, String.format("Starting: (%.4f, %.4f) -> (%.4f, %.4f), dist: %.1fkm, duration: %dmin, roads: %s",
@@ -151,6 +168,7 @@ public class GpsMockService extends Service {
         sCurrentLat = startLat;
         sCurrentLng = startLng;
         sProgress = 0;
+        sFixedPoint = fixedPoint;
 
         startForeground(NOTIFICATION_ID, buildNotification(0, startLat, startLng));
 
@@ -166,6 +184,7 @@ public class GpsMockService extends Service {
     @Override
     public void onDestroy() {
         sIsRunning = false;
+        sFixedPoint = false;
         handler.removeCallbacks(updateRunnable);
         removeMockProvider();
         Log.i(TAG, "Service stopped");
@@ -181,7 +200,9 @@ public class GpsMockService extends Service {
         try {
             try {
                 locationManager.removeTestProvider(PROVIDER_NAME);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // Provider may not exist yet; safe to ignore before re-adding.
+            }
 
             if (Build.VERSION.SDK_INT >= 31) {
                 locationManager.addTestProvider(
@@ -211,7 +232,9 @@ public class GpsMockService extends Service {
         try {
             locationManager.setTestProviderEnabled(PROVIDER_NAME, false);
             locationManager.removeTestProvider(PROVIDER_NAME);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            // Provider may already be removed or unavailable during teardown.
+        }
     }
 
     private void setMockLocation(double lat, double lng, double bearing) {
@@ -321,13 +344,13 @@ public class GpsMockService extends Service {
                 if (responseCode != 200) {
                     Log.w(TAG, "OSRM API returned " + responseCode + ", using direct line");
                 } else {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                     StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        sb.append(line);
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
                     }
-                    reader.close();
 
                     JSONObject json = new JSONObject(sb.toString());
                     if (!"Ok".equals(json.optString("code"))) {
@@ -449,6 +472,17 @@ public class GpsMockService extends Service {
         PendingIntent openPending = PendingIntent.getActivity(
                 this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        if (fixedPoint) {
+            return new NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setContentTitle("GPS 定點模擬中")
+                    .setContentText(String.format("位置: %.4f, %.4f", lat, lng))
+                    .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                    .setOngoing(true)
+                    .setContentIntent(openPending)
+                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPending)
+                    .build();
+        }
+
         int percent = (int) (progress * 100);
         String statusText;
         if (hasArrived) {
@@ -502,6 +536,10 @@ public class GpsMockService extends Service {
 
     public static boolean hasArrived() {
         return sHasArrived;
+    }
+
+    public static boolean isFixedPoint() {
+        return sFixedPoint;
     }
 
     public static String getLastError() {
