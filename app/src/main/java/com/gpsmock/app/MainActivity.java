@@ -20,14 +20,12 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.CheckBox;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -52,8 +50,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     private EditText startInput;
     private TextView startResultText;
     private EditText destInput;
-    private TextView destResultText;
-    private Spinner durationSpinner;
     private CheckBox followRoadsCheck;
     private CheckBox fixedPointCheck;
     private Button startStopBtn;
@@ -72,11 +68,9 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     private double startLat = 0, startLng = 0;
     private String startName = "";
     private boolean hasStartPoint = false;
-    private boolean useCurrentAsStart = true;
 
-    private double destLat = 0, destLng = 0;
-    private String destName = "";
-    private boolean hasDestination = false;
+    private LinearLayout waypointsContainer;
+    private final java.util.List<Waypoint> waypoints = new java.util.ArrayList<>();
 
     private Handler uiHandler;
     private TextView mockStatusText;
@@ -100,7 +94,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 } else if (GpsMockService.hasArrived()) {
                     mockStatusText.setText(String.format("已到達: %.4f, %.4f", lat, lng));
                 } else {
-                    mockStatusText.setText(String.format("模擬位置: %.4f, %.4f (%d%%)", lat, lng, progress));
+                    int segCount = GpsMockService.getSegCount();
+                    if (segCount > 1) {
+                        mockStatusText.setText(String.format("模擬中 第%d/%d段: %.4f, %.4f (%d%%)",
+                                GpsMockService.getSegIndex() + 1, segCount, lat, lng, progress));
+                    } else {
+                        mockStatusText.setText(String.format("模擬位置: %.4f, %.4f (%d%%)", lat, lng, progress));
+                    }
                 }
                 mockStatusText.setTextColor(UIHelper.ACCENT_GREEN);
                 uiHandler.postDelayed(this, 1000);
@@ -119,7 +119,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             -1,
     };
     private static final String[] DURATION_LABELS = {"10 分鐘", "30 分鐘", "1 小時", "2 小時", "自訂..."};
-    private long customDurationMs = 60 * 60 * 1000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -168,7 +167,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         Button useGpsBtn = UIHelper.smallButton(this, "使用", UIHelper.ACCENT_GREEN);
         useGpsBtn.setOnClickListener(v -> {
             if (hasLocation) {
-                useCurrentAsStart = true;
                 hasStartPoint = true;
                 startLat = currentLat;
                 startLng = currentLng;
@@ -251,8 +249,8 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
         content.addView(startCard);
 
-        // Destination card
-        content.addView(UIHelper.sectionHeader(this, "目的地"));
+        // 路線卡片（多點站點）
+        content.addView(UIHelper.sectionHeader(this, "路線"));
         LinearLayout destCard = UIHelper.card(this);
 
         fixedPointCheck = new CheckBox(this);
@@ -262,77 +260,59 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         fixedPointCheck.setButtonTintList(android.content.res.ColorStateList.valueOf(UIHelper.ACCENT_GREEN));
         LinearLayout.LayoutParams fixedLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        fixedLp.setMargins(0, 0, 0, UIHelper.dp(this, 4));
+        fixedLp.setMargins(0, 0, 0, UIHelper.dp(this, 8));
         fixedPointCheck.setLayoutParams(fixedLp);
         destCard.addView(fixedPointCheck);
 
-        TextView destLabel = new TextView(this);
-        destLabel.setText("輸入地點名稱:");
-        destLabel.setTextSize(14);
-        destLabel.setTextColor(UIHelper.TEXT_SECONDARY);
-        destCard.addView(destLabel);
+        TextView routeLabel = new TextView(this);
+        routeLabel.setText("路線站點（依序，最後一點為終點）:");
+        routeLabel.setTextSize(14);
+        routeLabel.setTextColor(UIHelper.TEXT_SECONDARY);
+        destCard.addView(routeLabel);
 
-        LinearLayout searchRow = new LinearLayout(this);
-        searchRow.setOrientation(LinearLayout.HORIZONTAL);
-        searchRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams searchRowLp = new LinearLayout.LayoutParams(
+        waypointsContainer = new LinearLayout(this);
+        waypointsContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams wpcLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        searchRowLp.setMargins(0, UIHelper.dp(this, 4), 0, 0);
-        searchRow.setLayoutParams(searchRowLp);
+        wpcLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
+        waypointsContainer.setLayoutParams(wpcLp);
+        destCard.addView(waypointsContainer);
 
-        destInput = UIHelper.styledInput(this, "例: 台北101、東京鐵塔");
+        LinearLayout addRow = new LinearLayout(this);
+        addRow.setOrientation(LinearLayout.HORIZONTAL);
+        addRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams addRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        addRowLp.setMargins(0, UIHelper.dp(this, 4), 0, 0);
+        addRow.setLayoutParams(addRowLp);
+
+        destInput = UIHelper.styledInput(this, "搜尋地點加入站點");
         destInput.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        searchRow.addView(destInput);
+        addRow.addView(destInput);
 
-        Button searchBtn = UIHelper.smallButton(this, "搜尋", UIHelper.ACCENT_BLUE);
-        LinearLayout.LayoutParams searchBtnLp = new LinearLayout.LayoutParams(
+        Button addSearchBtn = UIHelper.smallButton(this, "加入", UIHelper.ACCENT_BLUE);
+        LinearLayout.LayoutParams addSearchLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 44));
-        searchBtnLp.setMargins(UIHelper.dp(this, 8), 0, 0, 0);
-        searchBtn.setLayoutParams(searchBtnLp);
-        searchBtn.setOnClickListener(v -> searchPlace());
-        searchRow.addView(searchBtn);
+        addSearchLp.setMargins(UIHelper.dp(this, 8), 0, 0, 0);
+        addSearchBtn.setLayoutParams(addSearchLp);
+        addSearchBtn.setOnClickListener(v -> searchPlace());
+        addRow.addView(addSearchBtn);
 
-        destCard.addView(searchRow);
+        destCard.addView(addRow);
 
-        destResultText = new TextView(this);
-        destResultText.setText("尚未選擇目的地");
-        destResultText.setTextSize(13);
-        destResultText.setTextColor(UIHelper.TEXT_HINT);
-        destResultText.setPadding(0, UIHelper.dp(this, 8), 0, UIHelper.dp(this, 8));
-        destCard.addView(destResultText);
-
-        LinearLayout durRow = new LinearLayout(this);
-        durRow.setOrientation(LinearLayout.HORIZONTAL);
-        durRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams durRowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        durRowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
-        durRow.setLayoutParams(durRowLp);
-
-        TextView durLabel = new TextView(this);
-        durLabel.setText("移動時間:");
-        durLabel.setTextSize(14);
-        durLabel.setTextColor(UIHelper.TEXT_SECONDARY);
-        durLabel.setMinWidth(UIHelper.dp(this, 80));
-        durRow.addView(durLabel);
-
-        durationSpinner = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, DURATION_LABELS);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        durationSpinner.setAdapter(adapter);
-        durationSpinner.setBackground(UIHelper.roundRectStroke(UIHelper.BG_INPUT, Color.parseColor("#2E4050"), 14, 1, this));
-        durationSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-                if (DURATION_VALUES[position] == -1) {
-                    showCustomDurationDialog();
-                }
+        Button addCurrentBtn = UIHelper.smallButton(this, "加入目前位置為站點", UIHelper.ACCENT_GREEN);
+        LinearLayout.LayoutParams addCurLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 36));
+        addCurLp.setMargins(0, UIHelper.dp(this, 6), 0, 0);
+        addCurrentBtn.setLayoutParams(addCurLp);
+        addCurrentBtn.setOnClickListener(v -> {
+            if (hasLocation) {
+                addWaypoint(currentLat, currentLng, "目前位置");
+            } else {
+                Toast.makeText(this, "尚未取得 GPS 位置", Toast.LENGTH_SHORT).show();
             }
-            @Override
-            public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
-        durRow.addView(durationSpinner, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        destCard.addView(durRow);
+        destCard.addView(addCurrentBtn);
 
         followRoadsCheck = new CheckBox(this);
         followRoadsCheck.setText("沿道路移動（使用 OSRM 路線）");
@@ -346,23 +326,14 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         followRoadsCheck.setLayoutParams(followLp);
         destCard.addView(followRoadsCheck);
 
-        Button savePresetBtn = UIHelper.smallButton(this, "儲存為預設", UIHelper.ACCENT_GREEN);
-        savePresetBtn.setOnClickListener(v -> showSavePresetDialog());
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 36));
-        saveLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
-        savePresetBtn.setLayoutParams(saveLp);
-        destCard.addView(savePresetBtn);
-
-        // 定點模擬勾選時隱藏目的地相關欄位（終點＝起點）
+        // 定點模擬勾選時隱藏路線相關欄位（固定於起點）
         fixedPointCheck.setOnCheckedChangeListener((btn, isChecked) -> {
             int vis = isChecked ? View.GONE : View.VISIBLE;
-            destLabel.setVisibility(vis);
-            searchRow.setVisibility(vis);
-            destResultText.setVisibility(vis);
-            durRow.setVisibility(vis);
+            routeLabel.setVisibility(vis);
+            waypointsContainer.setVisibility(vis);
+            addRow.setVisibility(vis);
+            addCurrentBtn.setVisibility(vis);
             followRoadsCheck.setVisibility(vis);
-            savePresetBtn.setVisibility(vis);
         });
 
         content.addView(destCard);
@@ -423,6 +394,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         selectTab(0);
         loadPresets();
         loadFlowerPots();
+        renderWaypoints();
         checkAndRequestPermission();
     }
 
@@ -563,7 +535,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 List<Address> results = geocoder.getFromLocationName(query, 5);
                 runOnUiThread(() -> {
                     if (results == null || results.isEmpty()) {
-                        startResultText.setText("找不到「" + query + "\"");
+                        startResultText.setText("找不到「" + query + "」");
                         startResultText.setTextColor(UIHelper.ACCENT_RED);
                         hasStartPoint = false;
                     } else if (results.size() == 1) {
@@ -601,7 +573,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         startLng = address.getLongitude();
         startName = formatAddress(address);
         hasStartPoint = true;
-        useCurrentAsStart = false;
 
         startResultText.setText(String.format("%s\n(%.6f, %.6f)", startName, startLat, startLng));
         startResultText.setTextColor(UIHelper.ACCENT_GREEN);
@@ -616,17 +587,12 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             return;
         }
 
-        destResultText.setText("搜尋中...");
-        destResultText.setTextColor(UIHelper.TEXT_SECONDARY);
-
         new Thread(() -> {
             try {
                 List<Address> results = geocoder.getFromLocationName(query, 5);
                 runOnUiThread(() -> {
                     if (results == null || results.isEmpty()) {
-                        destResultText.setText("找不到「" + query + "\"");
-                        destResultText.setTextColor(UIHelper.ACCENT_RED);
-                        hasDestination = false;
+                        Toast.makeText(this, "找不到「" + query + "」", Toast.LENGTH_SHORT).show();
                     } else if (results.size() == 1) {
                         selectAddress(results.get(0));
                     } else {
@@ -635,9 +601,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
-                    destResultText.setText("搜尋失敗: " + e.getMessage());
-                    destResultText.setTextColor(UIHelper.ACCENT_RED);
-                    hasDestination = false;
+                    Toast.makeText(this, "搜尋失敗: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                     Log.e(TAG, "Place search failed: " + e.getMessage());
                 });
             }
@@ -659,15 +623,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     }
 
     private void selectAddress(Address address) {
-        destLat = address.getLatitude();
-        destLng = address.getLongitude();
-        destName = formatAddress(address);
-        hasDestination = true;
-
-        destResultText.setText(String.format("%s\n(%.6f, %.6f)", destName, destLat, destLng));
-        destResultText.setTextColor(UIHelper.ACCENT_GREEN);
-
-        Log.i(TAG, "Selected destination: " + destName);
+        String nm = formatAddress(address);
+        addWaypoint(address.getLatitude(), address.getLongitude(), nm);
+        destInput.setText("");
+        Log.i(TAG, "Added waypoint: " + nm);
     }
 
     private String formatAddress(Address address) {
@@ -707,20 +666,150 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         startLng = lng;
         startName = name;
         hasStartPoint = true;
-        useCurrentAsStart = false;
         startInput.setText(name);
         startResultText.setText(String.format("%s\n(%.6f, %.6f)", name, lat, lng));
         startResultText.setTextColor(UIHelper.ACCENT_GREEN);
     }
 
-    private void setDestination(double lat, double lng, String name) {
-        destLat = lat;
-        destLng = lng;
-        destName = name;
-        hasDestination = true;
-        destInput.setText(name);
-        destResultText.setText(String.format("%s\n(%.6f, %.6f)", name, lat, lng));
-        destResultText.setTextColor(UIHelper.ACCENT_GREEN);
+    private void addWaypoint(double lat, double lng, String name) {
+        Waypoint wp = new Waypoint();
+        wp.lat = lat;
+        wp.lng = lng;
+        wp.name = name;
+        wp.durationMs = DURATION_VALUES[0]; // 預設 10 分鐘
+        waypoints.add(wp);
+        renderWaypoints();
+    }
+
+    private void renderWaypoints() {
+        if (waypointsContainer == null) return;
+        waypointsContainer.removeAllViews();
+        if (waypoints.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("尚未新增站點（搜尋地點、加入目前位置，或從預設點按「終」）");
+            empty.setTextColor(UIHelper.TEXT_HINT);
+            empty.setTextSize(13);
+            empty.setPadding(0, UIHelper.dp(this, 4), 0, 0);
+            waypointsContainer.addView(empty);
+            return;
+        }
+        for (int i = 0; i < waypoints.size(); i++) {
+            waypointsContainer.addView(buildWaypointRow(i));
+        }
+    }
+
+    private View buildWaypointRow(int index) {
+        Waypoint wp = waypoints.get(index);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(UIHelper.roundRect(UIHelper.BG_CARD, 12, this));
+        int pad = UIHelper.dp(this, 10);
+        row.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, UIHelper.dp(this, 3), 0, UIHelper.dp(this, 3));
+        row.setLayoutParams(rowLp);
+
+        TextView name = new TextView(this);
+        name.setText((index + 1) + ". " + wp.name);
+        name.setTextSize(14);
+        name.setTextColor(UIHelper.TEXT_PRIMARY);
+        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        name.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(name);
+
+        int gap = UIHelper.dp(this, 4);
+
+        Button timeBtn = UIHelper.smallButton(this, formatDurShort(wp.durationMs), UIHelper.ACCENT_BLUE);
+        timeBtn.setLayoutParams(presetButtonParams(gap));
+        timeBtn.setOnClickListener(v -> showWaypointDurationDialog(wp));
+        row.addView(timeBtn);
+
+        Button upBtn = UIHelper.smallButton(this, "↑", UIHelper.TEXT_SECONDARY);
+        upBtn.setLayoutParams(presetButtonParams(gap));
+        upBtn.setOnClickListener(v -> moveWaypoint(index, -1));
+        row.addView(upBtn);
+
+        Button downBtn = UIHelper.smallButton(this, "↓", UIHelper.TEXT_SECONDARY);
+        downBtn.setLayoutParams(presetButtonParams(gap));
+        downBtn.setOnClickListener(v -> moveWaypoint(index, 1));
+        row.addView(downBtn);
+
+        Button delBtn = UIHelper.smallButton(this, "✕", UIHelper.ACCENT_RED);
+        delBtn.setLayoutParams(presetButtonParams(gap));
+        delBtn.setOnClickListener(v -> {
+            waypoints.remove(index);
+            renderWaypoints();
+        });
+        row.addView(delBtn);
+
+        return row;
+    }
+
+    private void moveWaypoint(int index, int delta) {
+        int target = index + delta;
+        if (target < 0 || target >= waypoints.size()) return;
+        Waypoint tmp = waypoints.get(index);
+        waypoints.set(index, waypoints.get(target));
+        waypoints.set(target, tmp);
+        renderWaypoints();
+    }
+
+    private void showWaypointDurationDialog(Waypoint wp) {
+        new AlertDialog.Builder(this)
+                .setTitle("這一段移動時間")
+                .setItems(DURATION_LABELS, (d, w) -> {
+                    if (DURATION_VALUES[w] == -1) {
+                        showWaypointCustomDurationDialog(wp);
+                    } else {
+                        wp.durationMs = DURATION_VALUES[w];
+                        renderWaypoints();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showWaypointCustomDurationDialog(Waypoint wp) {
+        EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setHint("分鐘數");
+        input.setText(String.valueOf(wp.durationMs / 60000));
+        input.setSelectAllOnFocus(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("自訂這一段時間")
+                .setMessage("請輸入移動時間（分鐘）")
+                .setView(input)
+                .setPositiveButton("確定", (d, w) -> {
+                    try {
+                        int minutes = Integer.parseInt(input.getText().toString().trim());
+                        if (minutes < 1) minutes = 1;
+                        if (minutes > 1440) minutes = 1440;
+                        wp.durationMs = minutes * 60 * 1000L;
+                        renderWaypoints();
+                    } catch (NumberFormatException e) {
+                        Toast.makeText(this, "請輸入有效數字", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private String formatDurShort(long ms) {
+        long minutes = ms / 60000;
+        if (minutes >= 60 && minutes % 60 == 0) {
+            return (minutes / 60) + " 小時";
+        }
+        return minutes + " 分";
+    }
+
+    private static class Waypoint {
+        double lat;
+        double lng;
+        String name;
+        long durationMs;
     }
 
     private void toggleMock() {
@@ -748,36 +837,40 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         }
 
         boolean fixed = fixedPointCheck.isChecked();
-        double actualDestLat, actualDestLng;
+        Intent intent = new Intent(this, GpsMockService.class);
+        intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, fixed);
+
         if (fixed) {
-            actualDestLat = actualStartLat;
-            actualDestLng = actualStartLng;
+            intent.putExtra(GpsMockService.EXTRA_START_LAT, actualStartLat);
+            intent.putExtra(GpsMockService.EXTRA_START_LNG, actualStartLng);
+            intent.putExtra(GpsMockService.EXTRA_END_LAT, actualStartLat);
+            intent.putExtra(GpsMockService.EXTRA_END_LNG, actualStartLng);
+            intent.putExtra(GpsMockService.EXTRA_DURATION_MS, 600_000L);
+            intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, false);
+            Log.i(TAG, "Starting fixed-point mock at start");
         } else {
-            if (!hasDestination) {
-                Toast.makeText(this, "請先搜尋並選擇目的地", Toast.LENGTH_SHORT).show();
+            if (waypoints.isEmpty()) {
+                Toast.makeText(this, "請至少新增一個路線站點", Toast.LENGTH_SHORT).show();
                 return;
             }
-            actualDestLat = destLat;
-            actualDestLng = destLng;
+            int p = waypoints.size() + 1;
+            double[] lats = new double[p];
+            double[] lngs = new double[p];
+            long[] segDur = new long[waypoints.size()];
+            lats[0] = actualStartLat;
+            lngs[0] = actualStartLng;
+            for (int i = 0; i < waypoints.size(); i++) {
+                Waypoint wp = waypoints.get(i);
+                lats[i + 1] = wp.lat;
+                lngs[i + 1] = wp.lng;
+                segDur[i] = wp.durationMs;
+            }
+            intent.putExtra(GpsMockService.EXTRA_LATS, lats);
+            intent.putExtra(GpsMockService.EXTRA_LNGS, lngs);
+            intent.putExtra(GpsMockService.EXTRA_SEG_DURATIONS, segDur);
+            intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, followRoadsCheck.isChecked());
+            Log.i(TAG, "Starting route mock: " + waypoints.size() + " segments");
         }
-
-        int durationIdx = durationSpinner.getSelectedItemPosition();
-        long duration = DURATION_VALUES[durationIdx] == -1 ? customDurationMs : DURATION_VALUES[durationIdx];
-        double distance = haversineDistance(actualStartLat, actualStartLng, actualDestLat, actualDestLng);
-
-        String startDesc = hasStartPoint ? startName : "目前位置";
-        String destDesc = fixed ? "定點(同起點)" : destName;
-        Log.i(TAG, String.format("Starting mock: %s -> %s, distance %.1fkm, duration %dmin",
-                startDesc, destDesc, distance / 1000, duration / 60000));
-
-        Intent intent = new Intent(this, GpsMockService.class);
-        intent.putExtra(GpsMockService.EXTRA_START_LAT, actualStartLat);
-        intent.putExtra(GpsMockService.EXTRA_START_LNG, actualStartLng);
-        intent.putExtra(GpsMockService.EXTRA_END_LAT, actualDestLat);
-        intent.putExtra(GpsMockService.EXTRA_END_LNG, actualDestLng);
-        intent.putExtra(GpsMockService.EXTRA_DURATION_MS, duration);
-        intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, !fixed && followRoadsCheck.isChecked());
-        intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, fixed);
 
         startForegroundService(intent);
         Toast.makeText(this, "開始模擬位置", Toast.LENGTH_SHORT).show();
@@ -804,20 +897,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             statusText.setTextColor(UIHelper.TEXT_SECONDARY);
             mockStatusText.setText("");
         }
-    }
-
-    private static double haversineDistance(double lat1, double lng1, double lat2, double lng2) {
-        double R = 6371000;
-        double phi1 = Math.toRadians(lat1);
-        double phi2 = Math.toRadians(lat2);
-        double deltaPhi = Math.toRadians(lat2 - lat1);
-        double deltaLambda = Math.toRadians(lng2 - lng1);
-
-        double a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2)
-                + Math.cos(phi1) * Math.cos(phi2)
-                * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
     }
 
     private void showMockLocationSetupDialog() {
@@ -894,7 +973,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
             Button endBtn = UIHelper.smallButton(this, "終", UIHelper.ACCENT_BLUE);
             endBtn.setLayoutParams(presetButtonParams(btnGap));
-            endBtn.setOnClickListener(v -> setDestination(preset.lat, preset.lng, preset.name));
+            endBtn.setOnClickListener(v -> addWaypoint(preset.lat, preset.lng, preset.name));
 
             Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
             delBtn.setLayoutParams(presetButtonParams(btnGap));
@@ -918,14 +997,6 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
             presetsContainer.addView(row);
         }
-    }
-
-    private void showSavePresetDialog() {
-        if (!hasDestination) {
-            Toast.makeText(this, "請先搜尋並選擇目的地", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        showSaveLocationDialog(destLat, destLng, destName);
     }
 
     private void showSaveLocationDialog(double lat, double lng, String defaultName) {
@@ -1218,33 +1289,5 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
         }
         b.show();
-    }
-
-    private void showCustomDurationDialog() {
-        EditText input = new EditText(this);
-        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        input.setHint("分鐘數");
-        input.setText(String.valueOf(customDurationMs / 60000));
-        input.setSelectAllOnFocus(true);
-
-        new AlertDialog.Builder(this)
-                .setTitle("自訂移動時間")
-                .setMessage("請輸入移動時間（分鐘）")
-                .setView(input)
-                .setPositiveButton("確定", (d, w) -> {
-                    try {
-                        int minutes = Integer.parseInt(input.getText().toString().trim());
-                        if (minutes < 1) minutes = 1;
-                        if (minutes > 1440) minutes = 1440;
-                        customDurationMs = minutes * 60 * 1000L;
-                        Toast.makeText(this, "已設定 " + minutes + " 分鐘", Toast.LENGTH_SHORT).show();
-                    } catch (NumberFormatException e) {
-                        Toast.makeText(this, "請輸入有效數字", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("取消", (d, w) -> {
-                    durationSpinner.setSelection(0);
-                })
-                .show();
     }
 }
