@@ -12,7 +12,7 @@ import java.util.List;
 public class GpsMockDbHelper extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "gpsmock.db";
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
 
     public static final String TABLE_PRESETS = "presets";
     public static final String COL_ID = "id";
@@ -24,6 +24,15 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
     public static final String TABLE_SETTINGS = "settings";
     public static final String COL_KEY = "key";
     public static final String COL_VALUE = "value";
+
+    public static final String TABLE_FLOWER_POTS = "flower_pots";
+    public static final String COL_ORIG_LAT = "orig_lat";
+    public static final String COL_ORIG_LNG = "orig_lng";
+    public static final String COL_CATEGORY = "category";
+    public static final String COL_CORRECTED = "corrected";
+
+    public static final String CATEGORY_PERMANENT = "permanent";
+    public static final String CATEGORY_EVENT = "event";
 
     public GpsMockDbHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -41,13 +50,55 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE " + TABLE_SETTINGS + " ("
                 + COL_KEY + " TEXT PRIMARY KEY, "
                 + COL_VALUE + " TEXT)");
+
+        createFlowerPotsTable(db);
+        seedFlowerPots(db);
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_PRESETS);
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_SETTINGS);
-        onCreate(db);
+        // 增量升級：保留使用者的 presets / settings，只補上新表。
+        if (oldVersion < 2) {
+            createFlowerPotsTable(db);
+            seedFlowerPots(db);
+        }
+    }
+
+    private void createFlowerPotsTable(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_FLOWER_POTS + " ("
+                + COL_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + COL_NAME + " TEXT NOT NULL, "
+                + COL_LAT + " REAL NOT NULL, "
+                + COL_LNG + " REAL NOT NULL, "
+                + COL_ORIG_LAT + " REAL NOT NULL, "
+                + COL_ORIG_LNG + " REAL NOT NULL, "
+                + COL_CATEGORY + " TEXT NOT NULL, "
+                + COL_CORRECTED + " INTEGER NOT NULL DEFAULT 0, "
+                + COL_CREATED_AT + " INTEGER NOT NULL)");
+    }
+
+    private void seedFlowerPots(SQLiteDatabase db) {
+        // 常駐金盆種子點（來源：社群整理之 Pikmin Bloom 金盆常駐座標）
+        seedPot(db, "台北車站", 25.04852, 121.51419);
+        seedPot(db, "海港城（香港）", 22.29482, 114.16581);
+        seedPot(db, "K11 Musea（香港）", 22.294558, 114.174111);
+        seedPot(db, "LBuy（香港）", 22.323930, 114.172349);
+        seedPot(db, "Niantic Park（東京）", 35.675424, 139.71291);
+        seedPot(db, "京瓷球場（京都）", 35.01720, 135.58487);
+        seedPot(db, "宮島SA 皮克敏露台", 34.3653190, 132.3180220);
+    }
+
+    private void seedPot(SQLiteDatabase db, String name, double lat, double lng) {
+        ContentValues cv = new ContentValues();
+        cv.put(COL_NAME, name);
+        cv.put(COL_LAT, lat);
+        cv.put(COL_LNG, lng);
+        cv.put(COL_ORIG_LAT, lat);
+        cv.put(COL_ORIG_LNG, lng);
+        cv.put(COL_CATEGORY, CATEGORY_PERMANENT);
+        cv.put(COL_CORRECTED, 0);
+        cv.put(COL_CREATED_AT, System.currentTimeMillis());
+        db.insert(TABLE_FLOWER_POTS, null, cv);
     }
 
     public long insertPreset(String name, double lat, double lng) {
@@ -67,16 +118,16 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
     public List<Preset> getAllPresets() {
         List<Preset> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.query(TABLE_PRESETS, null, null, null, null, null, COL_CREATED_AT + " DESC");
-        while (c.moveToNext()) {
-            Preset p = new Preset();
-            p.id = c.getLong(c.getColumnIndexOrThrow(COL_ID));
-            p.name = c.getString(c.getColumnIndexOrThrow(COL_NAME));
-            p.lat = c.getDouble(c.getColumnIndexOrThrow(COL_LAT));
-            p.lng = c.getDouble(c.getColumnIndexOrThrow(COL_LNG));
-            list.add(p);
+        try (Cursor c = db.query(TABLE_PRESETS, null, null, null, null, null, COL_CREATED_AT + " DESC")) {
+            while (c.moveToNext()) {
+                Preset p = new Preset();
+                p.id = c.getLong(c.getColumnIndexOrThrow(COL_ID));
+                p.name = c.getString(c.getColumnIndexOrThrow(COL_NAME));
+                p.lat = c.getDouble(c.getColumnIndexOrThrow(COL_LAT));
+                p.lng = c.getDouble(c.getColumnIndexOrThrow(COL_LNG));
+                list.add(p);
+            }
         }
-        c.close();
         return list;
     }
 
@@ -90,13 +141,13 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
 
     public String getSetting(String key, String defaultValue) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.query(TABLE_SETTINGS, new String[]{COL_VALUE},
-                COL_KEY + "=?", new String[]{key}, null, null, null);
         String result = defaultValue;
-        if (c.moveToFirst()) {
-            result = c.getString(0);
+        try (Cursor c = db.query(TABLE_SETTINGS, new String[]{COL_VALUE},
+                COL_KEY + "=?", new String[]{key}, null, null, null)) {
+            if (c.moveToFirst()) {
+                result = c.getString(0);
+            }
         }
-        c.close();
         return result;
     }
 
@@ -105,5 +156,79 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         public String name;
         public double lat;
         public double lng;
+    }
+
+    // ---- 金色花盆 ----
+
+    public long insertFlowerPot(String name, double lat, double lng, String category) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put(COL_NAME, name);
+        cv.put(COL_LAT, lat);
+        cv.put(COL_LNG, lng);
+        cv.put(COL_ORIG_LAT, lat);
+        cv.put(COL_ORIG_LNG, lng);
+        cv.put(COL_CATEGORY, category);
+        cv.put(COL_CORRECTED, 0);
+        cv.put(COL_CREATED_AT, System.currentTimeMillis());
+        return db.insert(TABLE_FLOWER_POTS, null, cv);
+    }
+
+    public void deleteFlowerPot(long id) {
+        getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_ID + "=?", new String[]{String.valueOf(id)});
+    }
+
+    /** 修正花盆座標：更新 lat/lng 並標記為已修正，保留原始座標供復原。 */
+    public void correctFlowerPot(long id, double lat, double lng) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put(COL_LAT, lat);
+        cv.put(COL_LNG, lng);
+        cv.put(COL_CORRECTED, 1);
+        db.update(TABLE_FLOWER_POTS, cv, COL_ID + "=?", new String[]{String.valueOf(id)});
+    }
+
+    /** 復原花盆座標為原始值。 */
+    public void revertFlowerPot(long id) {
+        getWritableDatabase().execSQL(
+                "UPDATE " + TABLE_FLOWER_POTS + " SET "
+                        + COL_LAT + "=" + COL_ORIG_LAT + ", "
+                        + COL_LNG + "=" + COL_ORIG_LNG + ", "
+                        + COL_CORRECTED + "=0 WHERE " + COL_ID + "=?",
+                new Object[]{id});
+    }
+
+    /** 取得所有花盆：常駐在前、活動在後，各依建立時間排序。 */
+    public List<FlowerPot> getAllFlowerPots() {
+        List<FlowerPot> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        String orderBy = "CASE " + COL_CATEGORY + " WHEN '" + CATEGORY_PERMANENT
+                + "' THEN 0 ELSE 1 END ASC, " + COL_CREATED_AT + " ASC";
+        try (Cursor c = db.query(TABLE_FLOWER_POTS, null, null, null, null, null, orderBy)) {
+            while (c.moveToNext()) {
+                FlowerPot p = new FlowerPot();
+                p.id = c.getLong(c.getColumnIndexOrThrow(COL_ID));
+                p.name = c.getString(c.getColumnIndexOrThrow(COL_NAME));
+                p.lat = c.getDouble(c.getColumnIndexOrThrow(COL_LAT));
+                p.lng = c.getDouble(c.getColumnIndexOrThrow(COL_LNG));
+                p.origLat = c.getDouble(c.getColumnIndexOrThrow(COL_ORIG_LAT));
+                p.origLng = c.getDouble(c.getColumnIndexOrThrow(COL_ORIG_LNG));
+                p.category = c.getString(c.getColumnIndexOrThrow(COL_CATEGORY));
+                p.corrected = c.getInt(c.getColumnIndexOrThrow(COL_CORRECTED)) != 0;
+                list.add(p);
+            }
+        }
+        return list;
+    }
+
+    public static class FlowerPot {
+        public long id;
+        public String name;
+        public double lat;
+        public double lng;
+        public double origLat;
+        public double origLng;
+        public String category;
+        public boolean corrected;
     }
 }

@@ -320,6 +320,7 @@ public class GpsMockService extends Service {
 
     private void startSimulation() {
         startTimeMs = System.currentTimeMillis();
+        handler.removeCallbacks(updateRunnable);
         handler.post(updateRunnable);
         Log.i(TAG, "Simulation started");
     }

@@ -23,6 +23,7 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.CheckBox;
@@ -58,6 +59,12 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     private Button startStopBtn;
     private LinearLayout presetsContainer;
     private TextView statusText;
+
+    private Button tabSimBtn;
+    private Button tabPotBtn;
+    private View simTabView;
+    private View potTabView;
+    private LinearLayout potsContainer;
 
     private double currentLat = 0, currentLng = 0;
     private boolean hasLocation = false;
@@ -199,27 +206,27 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         customLabel.setTextColor(UIHelper.TEXT_SECONDARY);
         startCard.addView(customLabel);
 
-        LinearLayout start搜尋Row = new LinearLayout(this);
-        start搜尋Row.setOrientation(LinearLayout.HORIZONTAL);
-        start搜尋Row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams start搜尋Lp = new LinearLayout.LayoutParams(
+        LinearLayout startSearchRow = new LinearLayout(this);
+        startSearchRow.setOrientation(LinearLayout.HORIZONTAL);
+        startSearchRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams startSearchLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        start搜尋Lp.setMargins(0, UIHelper.dp(this, 4), 0, 0);
-        start搜尋Row.setLayoutParams(start搜尋Lp);
+        startSearchLp.setMargins(0, UIHelper.dp(this, 4), 0, 0);
+        startSearchRow.setLayoutParams(startSearchLp);
 
         startInput = UIHelper.styledInput(this, "例: 台北車站");
         startInput.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        start搜尋Row.addView(startInput);
+        startSearchRow.addView(startInput);
 
-        Button start搜尋Btn = UIHelper.smallButton(this, "搜尋", UIHelper.ACCENT_BLUE);
-        LinearLayout.LayoutParams start搜尋BtnLp = new LinearLayout.LayoutParams(
+        Button startSearchBtn = UIHelper.smallButton(this, "搜尋", UIHelper.ACCENT_BLUE);
+        LinearLayout.LayoutParams startSearchBtnLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, UIHelper.dp(this, 44));
-        start搜尋BtnLp.setMargins(UIHelper.dp(this, 8), 0, 0, 0);
-        start搜尋Btn.setLayoutParams(start搜尋BtnLp);
-        start搜尋Btn.setOnClickListener(v -> searchStartPoint());
-        start搜尋Row.addView(start搜尋Btn);
+        startSearchBtnLp.setMargins(UIHelper.dp(this, 8), 0, 0, 0);
+        startSearchBtn.setLayoutParams(startSearchBtnLp);
+        startSearchBtn.setOnClickListener(v -> searchStartPoint());
+        startSearchRow.addView(startSearchBtn);
 
-        startCard.addView(start搜尋Row);
+        startCard.addView(startSearchRow);
 
         startResultText = new TextView(this);
         startResultText.setText("預設使用目前 GPS 位置");
@@ -385,13 +392,72 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         content.addView(presetsContainer);
 
         scrollView.addView(content);
-        root.addView(scrollView, new LinearLayout.LayoutParams(
+        simTabView = scrollView;
+
+        // 頂部分頁列（模擬 / 金色花盆）
+        LinearLayout tabBar = new LinearLayout(this);
+        tabBar.setOrientation(LinearLayout.HORIZONTAL);
+        tabBar.setBackgroundColor(UIHelper.BG_TOP_BAR);
+        int tabPad = UIHelper.dp(this, 6);
+        tabBar.setPadding(tabPad, tabPad, tabPad, tabPad);
+        tabSimBtn = tabButton("模擬");
+        tabPotBtn = tabButton("金色花盆");
+        tabSimBtn.setOnClickListener(v -> selectTab(0));
+        tabPotBtn.setOnClickListener(v -> selectTab(1));
+        tabBar.addView(tabSimBtn);
+        tabBar.addView(tabPotBtn);
+        root.addView(tabBar);
+
+        // 內容容器：兩個分頁疊在一起，切換 visibility
+        FrameLayout contentFrame = new FrameLayout(this);
+        potTabView = buildFlowerPotTab();
+        contentFrame.addView(simTabView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        contentFrame.addView(potTabView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(contentFrame, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
         setContentView(root);
 
+        selectTab(0);
         loadPresets();
+        loadFlowerPots();
         checkAndRequestPermission();
+    }
+
+    private Button tabButton(String text) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setAllCaps(false);
+        btn.setTextSize(15);
+        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        btn.setStateListAnimator(null);
+        btn.setElevation(0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, UIHelper.dp(this, 40), 1);
+        lp.setMargins(UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4), 0);
+        btn.setLayoutParams(lp);
+        return btn;
+    }
+
+    private void selectTab(int index) {
+        boolean sim = index == 0;
+        simTabView.setVisibility(sim ? View.VISIBLE : View.GONE);
+        potTabView.setVisibility(sim ? View.GONE : View.VISIBLE);
+        styleTab(tabSimBtn, sim);
+        styleTab(tabPotBtn, !sim);
+    }
+
+    private void styleTab(Button btn, boolean selected) {
+        if (selected) {
+            btn.setBackground(UIHelper.roundRect(UIHelper.ACCENT_GREEN, 10, this));
+            btn.setTextColor(Color.WHITE);
+        } else {
+            btn.setBackground(UIHelper.roundRectStroke(
+                    UIHelper.BG_CARD, Color.parseColor("#2E4050"), 10, 1, this));
+            btn.setTextColor(UIHelper.TEXT_SECONDARY);
+        }
     }
 
     @Override
@@ -881,6 +947,277 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 })
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    // ===================== 金色花盆分頁 =====================
+
+    private ScrollView buildFlowerPotTab() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        content.setPadding(p, p, p, p);
+
+        content.addView(UIHelper.sectionHeader(this, "金色花盆"));
+
+        TextView hint = new TextView(this);
+        hint.setText("點「定點」即固定到該花盆位置。座標不準時，用「修正」貼上 Google 正確座標。");
+        hint.setTextSize(12);
+        hint.setTextColor(UIHelper.TEXT_HINT);
+        hint.setPadding(0, 0, 0, UIHelper.dp(this, 8));
+        content.addView(hint);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button importBtn = UIHelper.smallButton(this, "匯入/貼上座標", UIHelper.ACCENT_BLUE);
+        importBtn.setOnClickListener(v -> showImportFlowerPotsDialog());
+        btnRow.addView(importBtn);
+        Button addBtn = UIHelper.smallButton(this, "+ 新增", UIHelper.ACCENT_GREEN);
+        addBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        addBtn.setOnClickListener(v -> showAddFlowerPotDialog());
+        btnRow.addView(addBtn);
+        content.addView(btnRow);
+
+        potsContainer = new LinearLayout(this);
+        potsContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams pcLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pcLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        potsContainer.setLayoutParams(pcLp);
+        content.addView(potsContainer);
+
+        scroll.addView(content);
+        return scroll;
+    }
+
+    private void loadFlowerPots() {
+        potsContainer.removeAllViews();
+        List<GpsMockDbHelper.FlowerPot> pots = dbHelper.getAllFlowerPots();
+        if (pots.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("尚無金色花盆");
+            empty.setTextColor(UIHelper.TEXT_HINT);
+            empty.setTextSize(13);
+            empty.setPadding(0, UIHelper.dp(this, 8), 0, 0);
+            potsContainer.addView(empty);
+            return;
+        }
+
+        String shownCategory = null;
+        for (GpsMockDbHelper.FlowerPot pot : pots) {
+            if (!pot.category.equals(shownCategory)) {
+                shownCategory = pot.category;
+                String label = GpsMockDbHelper.CATEGORY_PERMANENT.equals(pot.category) ? "常駐" : "活動";
+                potsContainer.addView(UIHelper.sectionHeader(this, label));
+            }
+            potsContainer.addView(buildFlowerPotRow(pot));
+        }
+    }
+
+    private View buildFlowerPotRow(GpsMockDbHelper.FlowerPot pot) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(UIHelper.roundRect(UIHelper.BG_CARD, 12, this));
+        int pad = UIHelper.dp(this, 12);
+        row.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
+        row.setLayoutParams(rowLp);
+
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView name = new TextView(this);
+        name.setText(pot.corrected ? pot.name + "（已修正）" : pot.name);
+        name.setTextSize(14);
+        name.setTextColor(UIHelper.TEXT_PRIMARY);
+        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+
+        TextView coords = new TextView(this);
+        coords.setText(String.format("%.5f, %.5f", pot.lat, pot.lng));
+        coords.setTextSize(12);
+        coords.setTextColor(UIHelper.TEXT_SECONDARY);
+
+        info.addView(name);
+        info.addView(coords);
+        row.addView(info);
+
+        int gap = UIHelper.dp(this, 6);
+
+        Button fixBtn = UIHelper.smallButton(this, "定點", UIHelper.ACCENT_GREEN);
+        fixBtn.setLayoutParams(presetButtonParams(gap));
+        fixBtn.setOnClickListener(v -> startFixedPointSim(pot.lat, pot.lng, pot.name));
+        row.addView(fixBtn);
+
+        Button correctBtn = UIHelper.smallButton(this, "修正", UIHelper.ACCENT_BLUE);
+        correctBtn.setLayoutParams(presetButtonParams(gap));
+        correctBtn.setOnClickListener(v -> showCorrectFlowerPotDialog(pot));
+        row.addView(correctBtn);
+
+        if (GpsMockDbHelper.CATEGORY_EVENT.equals(pot.category)) {
+            Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
+            delBtn.setLayoutParams(presetButtonParams(gap));
+            delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                    .setTitle("刪除花盆")
+                    .setMessage("確定要刪除「" + pot.name + "」？")
+                    .setPositiveButton("刪除", (d, w) -> {
+                        dbHelper.deleteFlowerPot(pot.id);
+                        loadFlowerPots();
+                    })
+                    .setNegativeButton("取消", null)
+                    .show());
+            row.addView(delBtn);
+        }
+
+        return row;
+    }
+
+    private void startFixedPointSim(double lat, double lng, String name) {
+        Intent intent = new Intent(this, GpsMockService.class);
+        intent.putExtra(GpsMockService.EXTRA_START_LAT, lat);
+        intent.putExtra(GpsMockService.EXTRA_START_LNG, lng);
+        intent.putExtra(GpsMockService.EXTRA_END_LAT, lat);
+        intent.putExtra(GpsMockService.EXTRA_END_LNG, lng);
+        intent.putExtra(GpsMockService.EXTRA_DURATION_MS, 600_000L);
+        intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, false);
+        intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, true);
+        startForegroundService(intent);
+        Toast.makeText(this, "已定點到「" + name + "」", Toast.LENGTH_SHORT).show();
+        selectTab(0);
+        uiHandler.postDelayed(() -> {
+            updateButtonState();
+            if (GpsMockService.isRunning()) {
+                uiHandler.post(statusUpdateRunnable);
+            }
+        }, 500);
+    }
+
+    /** 從文字解析第一組經緯度（接受 "lat, lng" 或含座標的 Google 地圖網址）。失敗回傳 null。 */
+    private double[] parseLatLng(String text) {
+        if (text == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("-?\\d{1,3}\\.\\d+").matcher(text);
+        Double lat = null;
+        Double lng = null;
+        while (m.find()) {
+            double v = Double.parseDouble(m.group());
+            if (lat == null) {
+                lat = v;
+            } else {
+                lng = v;
+                break;
+            }
+        }
+        if (lat == null || lng == null) return null;
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+        return new double[]{lat, lng};
+    }
+
+    private void showImportFlowerPotsDialog() {
+        EditText input = new EditText(this);
+        input.setHint("每行一筆，含座標即可\n例: 台北車站 25.04852, 121.51419");
+        input.setMinLines(5);
+        input.setGravity(Gravity.TOP);
+
+        new AlertDialog.Builder(this)
+                .setTitle("匯入/貼上座標")
+                .setView(input)
+                .setPositiveButton("匯入", (d, w) -> {
+                    String[] lines = input.getText().toString().split("\\n");
+                    int count = 0;
+                    for (String line : lines) {
+                        if (line.trim().isEmpty()) continue;
+                        double[] ll = parseLatLng(line);
+                        if (ll == null) continue;
+                        String nm = line.replaceAll("-?\\d{1,3}\\.\\d+", "").replaceAll("[,;|\\s]+", " ").trim();
+                        if (nm.isEmpty()) nm = String.format("花盆 %.4f", ll[0]);
+                        dbHelper.insertFlowerPot(nm, ll[0], ll[1], GpsMockDbHelper.CATEGORY_EVENT);
+                        count++;
+                    }
+                    Toast.makeText(this, "已匯入 " + count + " 筆", Toast.LENGTH_SHORT).show();
+                    loadFlowerPots();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showAddFlowerPotDialog() {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, 0, p, 0);
+
+        EditText nameInput = new EditText(this);
+        nameInput.setHint("名稱");
+        col.addView(nameInput);
+
+        EditText coordInput = new EditText(this);
+        coordInput.setHint("lat, lng 或 Google 地圖網址");
+        col.addView(coordInput);
+
+        new AlertDialog.Builder(this)
+                .setTitle("新增花盆")
+                .setView(col)
+                .setPositiveButton("新增", (d, w) -> {
+                    double[] ll = parseLatLng(coordInput.getText().toString());
+                    if (ll == null) {
+                        Toast.makeText(this, "座標格式無法解析", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String nm = nameInput.getText().toString().trim();
+                    if (nm.isEmpty()) nm = String.format("%.4f, %.4f", ll[0], ll[1]);
+                    dbHelper.insertFlowerPot(nm, ll[0], ll[1], GpsMockDbHelper.CATEGORY_EVENT);
+                    loadFlowerPots();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showCorrectFlowerPotDialog(GpsMockDbHelper.FlowerPot pot) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, 0, p, 0);
+
+        TextView origText = new TextView(this);
+        origText.setText(String.format("原始座標: %.5f, %.5f", pot.origLat, pot.origLng));
+        origText.setTextSize(12);
+        origText.setTextColor(UIHelper.TEXT_SECONDARY);
+        origText.setPadding(0, 0, 0, UIHelper.dp(this, 8));
+        col.addView(origText);
+
+        EditText coordInput = new EditText(this);
+        coordInput.setHint("貼上正確 lat,lng 或 Google 地圖網址");
+        coordInput.setText(String.format("%.5f, %.5f", pot.lat, pot.lng));
+        col.addView(coordInput);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("修正「" + pot.name + "」")
+                .setView(col)
+                .setPositiveButton("儲存修正", (d, w) -> {
+                    double[] ll = parseLatLng(coordInput.getText().toString());
+                    if (ll == null) {
+                        Toast.makeText(this, "座標格式無法解析", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dbHelper.correctFlowerPot(pot.id, ll[0], ll[1]);
+                    Toast.makeText(this, "已修正", Toast.LENGTH_SHORT).show();
+                    loadFlowerPots();
+                })
+                .setNegativeButton("取消", null);
+
+        if (pot.corrected) {
+            b.setNeutralButton("復原", (d, w) -> {
+                dbHelper.revertFlowerPot(pot.id);
+                Toast.makeText(this, "已復原", Toast.LENGTH_SHORT).show();
+                loadFlowerPots();
+            });
+        }
+        b.show();
     }
 
     private void showCustomDurationDialog() {
