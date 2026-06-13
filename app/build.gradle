@@ -10,8 +10,20 @@ android {
         applicationId "com.gpsmock.app"
         minSdk 26
         targetSdk 33
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
+    }
+
+    // 穩定的側載簽章金鑰：所有 build（含 CI）都用同一把，
+    // 才能讓不同版本之間直接更新（避免簽章不一致導致「套件衝突」）。
+    signingConfigs {
+        sideload {
+            storeFile file('gpsmock.p12')
+            storePassword 'gpsmock'
+            keyAlias 'gpsmock'
+            keyPassword 'gpsmock'
+            storeType 'PKCS12'
+        }
     }
 
     lintOptions {
@@ -21,10 +33,12 @@ android {
     buildTypes {
         debug {
             debuggable true
+            signingConfig signingConfigs.sideload
         }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.sideload
         }
     }
 
