@@ -34,7 +34,7 @@ object StepWriter {
 
     @JvmStatic
     fun isAvailable(context: Context): Boolean {
-        return HealthConnectClient.isProviderAvailable(context)
+        return HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
     }
 
     @JvmStatic
