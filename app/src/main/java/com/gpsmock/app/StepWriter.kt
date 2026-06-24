@@ -29,7 +29,7 @@ object StepWriter {
 
     @JvmField
     val REQUIRED_PERMISSIONS: Set<String> = setOf(
-        HealthPermission.createWritePermission(StepsRecord::class)
+        HealthPermission.getWritePermission(StepsRecord::class)
     )
 
     @JvmStatic
@@ -59,7 +59,7 @@ object StepWriter {
         val client = HealthConnectClient.getOrCreate(context)
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val granted = client.permissionController.getGrantedPermissions(REQUIRED_PERMISSIONS)
+                val granted = client.permissionController.getGrantedPermissions()
                 withContext(Dispatchers.Main) {
                     callback.onResult(granted.containsAll(REQUIRED_PERMISSIONS))
                 }
