@@ -47,8 +47,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+
+import androidx.activity.result.ActivityResultLauncher;
 
 public class MainActivity extends AppCompatActivity implements LocationListener {
 
@@ -88,6 +92,15 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
 
     private Handler uiHandler;
     private TextView mockStatusText;
+
+    // 步數寫入
+    private ActivityResultLauncher<Set<String>> healthPermLauncher;
+    private double stepHours = 2.0;
+    private int stepRate = 5500;
+    private TextView stepEstimateText;
+    private TextView stepStatusText;
+    private Button stepWriteBtn;
+    private final Button[] stepHourBtns = new Button[7];
 
     private final Runnable statusUpdateRunnable = new Runnable() {
         @Override
@@ -138,6 +151,17 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(UIHelper.BG_TOP_BAR);
+
+        healthPermLauncher = registerForActivityResult(
+                StepWriter.createPermissionContract(),
+                granted -> {
+                    if (granted.containsAll(StepWriter.REQUIRED_PERMISSIONS)) {
+                        performWriteSteps();
+                    } else {
+                        Toast.makeText(this, "需要 Health Connect 步數寫入權限", Toast.LENGTH_LONG).show();
+                    }
+                }
+        );
 
         dbHelper = new GpsMockDbHelper(this);
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
@@ -375,6 +399,142 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         presetsContainer = new LinearLayout(this);
         presetsContainer.setOrientation(LinearLayout.VERTICAL);
         content.addView(presetsContainer);
+
+        // ==================== 步數寫入區塊 ====================
+        content.addView(UIHelper.sectionHeader(this, "步數寫入（HEALTH CONNECT）"));
+
+        LinearLayout stepCard = UIHelper.card(this);
+
+        TextView stepInfo = new TextView(this);
+        stepInfo.setText("將步數寫入 Health Connect，Pikmin Bloom 等遊戲會透過 Adventure Sync 讀取。");
+        stepInfo.setTextSize(12);
+        stepInfo.setTextColor(UIHelper.TEXT_HINT);
+        stepInfo.setPadding(0, 0, 0, UIHelper.dp(this, 10));
+        stepCard.addView(stepInfo);
+
+        // 時數選擇
+        TextView hoursLabel = new TextView(this);
+        hoursLabel.setText("散步時數");
+        hoursLabel.setTextSize(14);
+        hoursLabel.setTextColor(UIHelper.TEXT_SECONDARY);
+        stepCard.addView(hoursLabel);
+
+        LinearLayout hoursRow = new LinearLayout(this);
+        hoursRow.setOrientation(LinearLayout.HORIZONTAL);
+        hoursRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams hRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hRowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 8));
+        hoursRow.setLayoutParams(hRowLp);
+
+        double[] hourOptions = {1, 2, 3, 4, 6, 8};
+        for (int i = 0; i < hourOptions.length; i++) {
+            final double h = hourOptions[i];
+            String label = h >= 1 && h == (int) h ? (int) h + "h" : h + "h";
+            Button hBtn = UIHelper.smallButton(this, label, UIHelper.ACCENT_BLUE);
+            LinearLayout.LayoutParams hBtnLp = new LinearLayout.LayoutParams(
+                    0, UIHelper.dp(this, 36), 1);
+            hBtnLp.setMargins(UIHelper.dp(this, 2), 0, UIHelper.dp(this, 2), 0);
+            hBtn.setLayoutParams(hBtnLp);
+            hBtn.setOnClickListener(v -> {
+                stepHours = h;
+                updateStepHourButtons();
+                updateStepEstimate();
+            });
+            stepHourBtns[i] = hBtn;
+            hoursRow.addView(hBtn);
+        }
+        // 自訂按鈕
+        Button customHBtn = UIHelper.smallButton(this, "自訂", UIHelper.TEXT_SECONDARY);
+        LinearLayout.LayoutParams customLp = new LinearLayout.LayoutParams(
+                0, UIHelper.dp(this, 36), 1);
+        customLp.setMargins(UIHelper.dp(this, 2), 0, UIHelper.dp(this, 2), 0);
+        customHBtn.setLayoutParams(customLp);
+        customHBtn.setOnClickListener(v -> showCustomStepHoursDialog());
+        stepHourBtns[6] = customHBtn;
+        hoursRow.addView(customHBtn);
+
+        stepCard.addView(hoursRow);
+
+        // 每小時步數
+        TextView rateLabel = new TextView(this);
+        rateLabel.setText("每小時步數（建議 3,000～8,000）");
+        rateLabel.setTextSize(14);
+        rateLabel.setTextColor(UIHelper.TEXT_SECONDARY);
+        stepCard.addView(rateLabel);
+
+        LinearLayout rateRow = new LinearLayout(this);
+        rateRow.setOrientation(LinearLayout.HORIZONTAL);
+        rateRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rateRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rateRowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
+        rateRow.setLayoutParams(rateRowLp);
+
+        EditText rateInput = UIHelper.styledInput(this, "5500");
+        rateInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        rateInput.setText(String.valueOf(stepRate));
+        rateInput.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        rateInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                try {
+                    int v = Integer.parseInt(s.toString().trim());
+                    if (v > 0) {
+                        stepRate = v;
+                        updateStepEstimate();
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+        });
+        rateRow.addView(rateInput);
+
+        TextView rateUnit = new TextView(this);
+        rateUnit.setText(" 步/時（±15%波動）");
+        rateUnit.setTextSize(13);
+        rateUnit.setTextColor(UIHelper.TEXT_HINT);
+        rateRow.addView(rateUnit);
+
+        stepCard.addView(rateRow);
+
+        // 預估結果
+        View stepDivider = new View(this);
+        stepDivider.setBackgroundColor(UIHelper.DIVIDER);
+        LinearLayout.LayoutParams sdLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, UIHelper.dp(this, 1));
+        sdLp.setMargins(0, UIHelper.dp(this, 8), 0, UIHelper.dp(this, 8));
+        stepDivider.setLayoutParams(sdLp);
+        stepCard.addView(stepDivider);
+
+        stepEstimateText = new TextView(this);
+        stepEstimateText.setTextSize(15);
+        stepEstimateText.setTextColor(UIHelper.ACCENT_GREEN);
+        stepEstimateText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        stepCard.addView(stepEstimateText);
+
+        content.addView(stepCard);
+
+        // 寫入按鈕
+        stepWriteBtn = UIHelper.primaryButton(this, "寫入步數");
+        stepWriteBtn.setBackground(UIHelper.roundRect(UIHelper.ACCENT_BLUE, 14, this));
+        stepWriteBtn.setOnClickListener(v -> onWriteStepsClick());
+        content.addView(stepWriteBtn);
+
+        stepStatusText = new TextView(this);
+        stepStatusText.setTextSize(12);
+        stepStatusText.setTextColor(UIHelper.TEXT_SECONDARY);
+        stepStatusText.setGravity(Gravity.CENTER);
+        stepStatusText.setPadding(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 12));
+        content.addView(stepStatusText);
+
+        updateStepHourButtons();
+        updateStepEstimate();
+
+        // ==================== 底部 ====================
 
         Button updateBtn = UIHelper.smallButton(this, "檢查更新", UIHelper.ACCENT_BLUE);
         LinearLayout.LayoutParams updLp = new LinearLayout.LayoutParams(
@@ -1324,6 +1484,136 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
         }
         b.show();
+    }
+
+    // ===================== 步數寫入（Health Connect） =====================
+
+    private void updateStepHourButtons() {
+        double[] options = {1, 2, 3, 4, 6, 8};
+        boolean matched = false;
+        for (int i = 0; i < options.length; i++) {
+            boolean sel = stepHours == options[i];
+            if (sel) matched = true;
+            styleStepHourBtn(stepHourBtns[i], sel);
+        }
+        // 自訂按鈕：沒有匹配預設值時高亮
+        styleStepHourBtn(stepHourBtns[6], !matched);
+        if (!matched) {
+            String label = stepHours == (int) stepHours
+                    ? (int) stepHours + "h" : String.format("%.1fh", stepHours);
+            stepHourBtns[6].setText(label);
+        } else {
+            stepHourBtns[6].setText("自訂");
+        }
+    }
+
+    private void styleStepHourBtn(Button btn, boolean selected) {
+        if (selected) {
+            btn.setBackground(UIHelper.roundRect(UIHelper.ACCENT_BLUE, 10, this));
+            btn.setTextColor(Color.WHITE);
+        } else {
+            btn.setBackground(UIHelper.roundRectStroke(
+                    Color.TRANSPARENT, UIHelper.ACCENT_BLUE, 10, 1, this));
+            btn.setTextColor(UIHelper.ACCENT_BLUE);
+        }
+    }
+
+    private void updateStepEstimate() {
+        long total = Math.round(stepHours * stepRate);
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.LocalDateTime start = now.minusMinutes(Math.round(stepHours * 60));
+        String timeRange = String.format("%02d:%02d ~ %02d:%02d",
+                start.getHour(), start.getMinute(), now.getHour(), now.getMinute());
+        stepEstimateText.setText(String.format("預估總步數：%,d 步\n時間範圍：%s", total, timeRange));
+    }
+
+    private void showCustomStepHoursDialog() {
+        EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setHint("小時數（例如 1.5）");
+        input.setText(String.valueOf(stepHours));
+        input.setSelectAllOnFocus(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("自訂散步時數")
+                .setView(input)
+                .setPositiveButton("確定", (d, w) -> {
+                    try {
+                        double h = Double.parseDouble(input.getText().toString().trim());
+                        if (h < 0.5) h = 0.5;
+                        if (h > 24) h = 24;
+                        stepHours = h;
+                        updateStepHourButtons();
+                        updateStepEstimate();
+                    } catch (NumberFormatException e) {
+                        Toast.makeText(this, "請輸入有效數字", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void onWriteStepsClick() {
+        if (!StepWriter.isAvailable(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("需要 Health Connect")
+                    .setMessage("請先安裝 Health Connect（Google 健康數據）應用程式。")
+                    .setPositiveButton("前往安裝", (d, w) -> {
+                        try {
+                            startActivity(StepWriter.getInstallIntent());
+                        } catch (Exception e) {
+                            Toast.makeText(this, "無法開啟商店", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+
+        stepWriteBtn.setEnabled(false);
+        stepStatusText.setText("檢查權限中...");
+        stepStatusText.setTextColor(UIHelper.TEXT_SECONDARY);
+
+        StepWriter.checkPermissions(this, granted -> {
+            if (granted) {
+                performWriteSteps();
+            } else {
+                stepStatusText.setText("請授予步數寫入權限");
+                stepWriteBtn.setEnabled(true);
+                healthPermLauncher.launch(StepWriter.REQUIRED_PERMISSIONS);
+            }
+        });
+    }
+
+    private void performWriteSteps() {
+        long totalSteps = Math.round(stepHours * stepRate);
+        if (totalSteps <= 0) {
+            Toast.makeText(this, "步數必須大於 0", Toast.LENGTH_SHORT).show();
+            stepWriteBtn.setEnabled(true);
+            return;
+        }
+
+        stepWriteBtn.setEnabled(false);
+        stepStatusText.setText("寫入中...");
+        stepStatusText.setTextColor(UIHelper.ACCENT_BLUE);
+
+        StepWriter.writeSteps(this, totalSteps, stepHours, new StepWriter.Callback() {
+            @Override
+            public void onSuccess(long steps) {
+                stepWriteBtn.setEnabled(true);
+                stepStatusText.setText(String.format("已寫入 %,d 步", steps));
+                stepStatusText.setTextColor(UIHelper.ACCENT_GREEN);
+                Log.i(TAG, "Steps written: " + steps);
+            }
+
+            @Override
+            public void onError(String message) {
+                stepWriteBtn.setEnabled(true);
+                stepStatusText.setText("寫入失敗: " + message);
+                stepStatusText.setTextColor(UIHelper.ACCENT_RED);
+                Log.e(TAG, "Step write error: " + message);
+            }
+        });
     }
 
     // ===================== 自主更新（GitHub Release） =====================
