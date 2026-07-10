@@ -1625,7 +1625,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         intent.putExtra(GpsMockService.EXTRA_JUMP_MODE, true);
         startForegroundService(intent);
 
-        Toast.makeText(this, String.format("開始巡迴 %d 個花盆（每點 %d 秒）", p, intervalSec),
+        Toast.makeText(this, String.format("開始巡迴 %d 個花盆（每點 %d 秒）", pots.size(), intervalSec),
                 Toast.LENGTH_SHORT).show();
         selectTab(0); // 切回模擬分頁看狀態
         uiHandler.postDelayed(() -> {
