@@ -45,6 +45,7 @@ public class GpsMockService extends Service {
     public static final String EXTRA_LATS = "lats";
     public static final String EXTRA_LNGS = "lngs";
     public static final String EXTRA_SEG_DURATIONS = "seg_durations";
+    public static final String EXTRA_JUMP_MODE = "jump_mode";
 
     public static final String ACTION_STOP = "com.gpsmock.app.GPS_MOCK_STOP";
 
@@ -62,6 +63,7 @@ public class GpsMockService extends Service {
     private static volatile boolean sFixedPoint = false;
     private static volatile int sSegIndex = 0;
     private static volatile int sSegCount = 0;
+    private static volatile boolean sJumpMode = false;
 
     private LocationManager locationManager;
     private Handler handler;
@@ -70,6 +72,7 @@ public class GpsMockService extends Service {
     private double startLat, startLng; // 起點（定點模式與通知初始值）
     private boolean followRoads;
     private boolean fixedPoint;
+    private boolean jumpMode;
 
     private final List<Segment> segments = new ArrayList<>();
     private long totalDurationMs;
@@ -111,14 +114,23 @@ public class GpsMockService extends Service {
             long segElapsed = now - segStartTimeMs;
             double segFrac = seg.durationMs > 0 ? Math.min(1.0, (double) segElapsed / seg.durationMs) : 1.0;
 
-            double targetDist = segFrac * seg.totalDist;
-            double[] pos = positionAlong(seg, targetDist);
-            double bearing = bearingAlong(seg, targetDist);
+            double[] pos;
+            double bearing;
+            if (jumpMode) {
+                // 跳點模式：直接定位在該段終點，等待 durationMs 後跳到下一段
+                pos = seg.points.get(seg.points.size() - 1);
+                bearing = 0;
+                currentSpeed = 0;
+            } else {
+                double targetDist = segFrac * seg.totalDist;
+                pos = positionAlong(seg, targetDist);
+                bearing = bearingAlong(seg, targetDist);
+                currentSpeed = seg.durationMs > 0 ? (float) (seg.totalDist / (seg.durationMs / 1000.0)) : 0f;
+            }
 
             sCurrentLat = pos[0];
             sCurrentLng = pos[1];
             sSegIndex = curSeg;
-            currentSpeed = seg.durationMs > 0 ? (float) (seg.totalDist / (seg.durationMs / 1000.0)) : 0f;
 
             double overall = totalDurationMs > 0
                     ? Math.min(1.0, (double) (durationBefore(curSeg) + segElapsed) / totalDurationMs)
@@ -167,6 +179,7 @@ public class GpsMockService extends Service {
 
         fixedPoint = intent.getBooleanExtra(EXTRA_FIXED_POINT, false);
         followRoads = intent.getBooleanExtra(EXTRA_FOLLOW_ROADS, false);
+        jumpMode = intent.getBooleanExtra(EXTRA_JUMP_MODE, false);
 
         double[] lats = intent.getDoubleArrayExtra(EXTRA_LATS);
         double[] lngs = intent.getDoubleArrayExtra(EXTRA_LNGS);
@@ -194,6 +207,10 @@ public class GpsMockService extends Service {
 
         if (fixedPoint) {
             followRoads = false;
+            jumpMode = false;
+        }
+        if (jumpMode) {
+            followRoads = false; // 跳點模式不需要道路路線
         }
         startLat = ptLats[0];
         startLng = ptLngs[0];
@@ -222,6 +239,7 @@ public class GpsMockService extends Service {
         sCurrentLng = startLng;
         sProgress = 0;
         sFixedPoint = fixedPoint;
+        sJumpMode = jumpMode;
         sSegIndex = 0;
         sSegCount = fixedPoint ? 0 : durations.length;
 
@@ -244,6 +262,7 @@ public class GpsMockService extends Service {
     public void onDestroy() {
         sIsRunning = false;
         sFixedPoint = false;
+        sJumpMode = false;
         handler.removeCallbacks(updateRunnable);
         removeMockProvider();
         Log.i(TAG, "Service stopped");
@@ -574,7 +593,9 @@ public class GpsMockService extends Service {
 
         String title;
         if (hasArrived) {
-            title = "GPS 模擬 - 已到達";
+            title = jumpMode ? "跳點巡迴 - 已完成" : "GPS 模擬 - 已到達";
+        } else if (jumpMode) {
+            title = String.format("跳點巡迴中（第 %d/%d 點）", curSeg + 1, segments.size());
         } else if (segments.size() > 1) {
             title = String.format("GPS 模擬中 %d%%（第 %d/%d 段）", percent, curSeg + 1, segments.size());
         } else {
@@ -637,6 +658,10 @@ public class GpsMockService extends Service {
 
     public static int getSegCount() {
         return sSegCount;
+    }
+
+    public static boolean isJumpMode() {
+        return sJumpMode;
     }
 
     public static String getLastError() {

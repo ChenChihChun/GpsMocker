@@ -118,6 +118,14 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 int progress = (int) (GpsMockService.getProgress() * 100);
                 if (GpsMockService.isFixedPoint()) {
                     mockStatusText.setText(String.format("定點模擬中: %.4f, %.4f", lat, lng));
+                } else if (GpsMockService.isJumpMode()) {
+                    int segCount = GpsMockService.getSegCount();
+                    if (GpsMockService.hasArrived()) {
+                        mockStatusText.setText(String.format("巡迴完成（%d 點）: %.4f, %.4f", segCount, lat, lng));
+                    } else {
+                        mockStatusText.setText(String.format("跳點巡迴 第%d/%d點: %.4f, %.4f",
+                                GpsMockService.getSegIndex() + 1, segCount, lat, lng));
+                    }
                 } else if (GpsMockService.hasArrived()) {
                     mockStatusText.setText(String.format("已到達: %.4f, %.4f", lat, lng));
                 } else {
@@ -1246,6 +1254,16 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         btnRow.addView(addBtn);
         content.addView(btnRow);
 
+        // 巡迴花盆按鈕
+        Button tourBtn = UIHelper.primaryButton(this, "巡迴所有花盆（跳點模式）");
+        tourBtn.setBackground(UIHelper.roundRect(Color.parseColor("#FF6F00"), 14, this));
+        LinearLayout.LayoutParams tourLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tourLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        tourBtn.setLayoutParams(tourLp);
+        tourBtn.setOnClickListener(v -> showTourFlowerPotsDialog());
+        content.addView(tourBtn);
+
         potsContainer = new LinearLayout(this);
         potsContainer.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams pcLp = new LinearLayout.LayoutParams(
@@ -1484,6 +1502,138 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
         }
         b.show();
+    }
+
+    // ===================== 巡迴花盆（跳點模式） =====================
+
+    private void showTourFlowerPotsDialog() {
+        List<GpsMockDbHelper.FlowerPot> pots = dbHelper.getAllFlowerPots();
+        if (pots.isEmpty()) {
+            Toast.makeText(this, "尚無花盆可巡迴", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (GpsMockService.isRunning()) {
+            Toast.makeText(this, "請先停止目前的模擬", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] intervalLabels = {"每點停留 3 秒", "每點停留 5 秒", "每點停留 10 秒", "自訂秒數..."};
+        int[] intervalValues = {3, 5, 10, -1};
+
+        new AlertDialog.Builder(this)
+                .setTitle("巡迴 " + pots.size() + " 個花盆")
+                .setItems(intervalLabels, (d, w) -> {
+                    if (intervalValues[w] == -1) {
+                        showCustomTourIntervalDialog(pots);
+                    } else {
+                        confirmTourStart(pots, intervalValues[w]);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showCustomTourIntervalDialog(List<GpsMockDbHelper.FlowerPot> pots) {
+        EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setHint("秒數");
+        input.setText("5");
+        input.setSelectAllOnFocus(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("自訂每點停留秒數")
+                .setView(input)
+                .setPositiveButton("確定", (d, w) -> {
+                    try {
+                        int sec = Integer.parseInt(input.getText().toString().trim());
+                        if (sec < 1) sec = 1;
+                        if (sec > 300) sec = 300;
+                        confirmTourStart(pots, sec);
+                    } catch (NumberFormatException e) {
+                        Toast.makeText(this, "請輸入有效數字", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void confirmTourStart(List<GpsMockDbHelper.FlowerPot> pots, int intervalSec) {
+        long totalSec = (long) pots.size() * intervalSec;
+        String timeStr = totalSec >= 60
+                ? String.format("%d 分 %d 秒", totalSec / 60, totalSec % 60)
+                : totalSec + " 秒";
+
+        CheckBox stepCheck = new CheckBox(this);
+        stepCheck.setText("同時寫入步數（2 小時 / 5500 步/時）");
+        stepCheck.setTextColor(UIHelper.TEXT_PRIMARY);
+        stepCheck.setTextSize(14);
+        stepCheck.setChecked(true);
+        stepCheck.setButtonTintList(android.content.res.ColorStateList.valueOf(UIHelper.ACCENT_GREEN));
+        int pad = UIHelper.dp(this, 16);
+        stepCheck.setPadding(pad, pad, pad, 0);
+
+        new AlertDialog.Builder(this)
+                .setTitle("確認巡迴")
+                .setMessage(String.format("共 %d 個花盆，每點停留 %d 秒\n預計總時間：%s",
+                        pots.size(), intervalSec, timeStr))
+                .setView(stepCheck)
+                .setPositiveButton("開始巡迴", (d, w) -> {
+                    boolean writeSteps = stepCheck.isChecked();
+                    startFlowerPotTour(pots, intervalSec);
+                    if (writeSteps) {
+                        // 延遲一秒後寫步數，避免與模擬啟動衝突
+                        uiHandler.postDelayed(this::onWriteStepsClick, 1000);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void startFlowerPotTour(List<GpsMockDbHelper.FlowerPot> pots, int intervalSec) {
+        // 起點 = 第一個花盆，加一段自己到自己讓第一個花盆也有停留時間
+        // 結構：[P0→P0(停留), P0→P1(停留), P1→P2(停留), ...]
+        GpsMockDbHelper.FlowerPot first = pots.get(0);
+
+        int totalPoints = pots.size() + 1; // 多一個起點自環
+        double[] lats = new double[totalPoints];
+        double[] lngs = new double[totalPoints];
+        long[] segDur = new long[totalPoints - 1];
+
+        long intervalMs = intervalSec * 1000L;
+
+        // 第 0 點 = 起點（第一個花盆）
+        lats[0] = first.lat;
+        lngs[0] = first.lng;
+        // 第 1 點 = 同一個花盆（自環，讓跳點模式在此停留）
+        lats[1] = first.lat;
+        lngs[1] = first.lng;
+        segDur[0] = intervalMs;
+
+        for (int i = 1; i < pots.size(); i++) {
+            GpsMockDbHelper.FlowerPot pot = pots.get(i);
+            lats[i + 1] = pot.lat;
+            lngs[i + 1] = pot.lng;
+            segDur[i] = intervalMs;
+        }
+
+        Intent intent = new Intent(this, GpsMockService.class);
+        intent.putExtra(GpsMockService.EXTRA_LATS, lats);
+        intent.putExtra(GpsMockService.EXTRA_LNGS, lngs);
+        intent.putExtra(GpsMockService.EXTRA_SEG_DURATIONS, segDur);
+        intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, false);
+        intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, false);
+        intent.putExtra(GpsMockService.EXTRA_JUMP_MODE, true);
+        startForegroundService(intent);
+
+        Toast.makeText(this, String.format("開始巡迴 %d 個花盆（每點 %d 秒）", p, intervalSec),
+                Toast.LENGTH_SHORT).show();
+        selectTab(0); // 切回模擬分頁看狀態
+        uiHandler.postDelayed(() -> {
+            updateButtonState();
+            if (GpsMockService.isRunning()) {
+                uiHandler.post(statusUpdateRunnable);
+            }
+        }, 500);
     }
 
     // ===================== 步數寫入（Health Connect） =====================
