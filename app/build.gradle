@@ -11,8 +11,8 @@ android {
         applicationId "com.gpsmock.app"
         minSdk 26
         targetSdk 33
-        versionCode 9
-        versionName "1.8"
+        versionCode 10
+        versionName "1.9"
     }
 
     // 穩定的側載簽章金鑰：所有 build（含 CI）都用同一把，
