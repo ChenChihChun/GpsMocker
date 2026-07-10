@@ -1,0 +1,367 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10001 /* GpsMockerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10001; };
+		A10002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10002; };
+		A10003 /* SimulationTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10003; };
+		A10004 /* FlowerPotTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10004; };
+		A10005 /* UIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10005; };
+		A10006 /* LocationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10006; };
+		A10007 /* FlowerPot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10007; };
+		A10008 /* RouteWaypoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008; };
+		A10009 /* DatabaseService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10009; };
+		A10010 /* OSRMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10010; };
+		A10011 /* StepWriterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10011; };
+		A10012 /* LocationSimulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012; };
+		A10013 /* LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10013; };
+		A10014 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10014; };
+		A10015 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10015; };
+		A10016 /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10016; };
+		A10017 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C10001; settings = {ATTRIBUTES = (Required, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10001 /* GpsMockerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GpsMockerApp.swift; sourceTree = "<group>"; };
+		B10002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		B10003 /* SimulationTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationTab.swift; sourceTree = "<group>"; };
+		B10004 /* FlowerPotTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerPotTab.swift; sourceTree = "<group>"; };
+		B10005 /* UIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponents.swift; sourceTree = "<group>"; };
+		B10006 /* LocationPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPreset.swift; sourceTree = "<group>"; };
+		B10007 /* FlowerPot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerPot.swift; sourceTree = "<group>"; };
+		B10008 /* RouteWaypoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteWaypoint.swift; sourceTree = "<group>"; };
+		B10009 /* DatabaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseService.swift; sourceTree = "<group>"; };
+		B10010 /* OSRMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSRMService.swift; sourceTree = "<group>"; };
+		B10011 /* StepWriterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepWriterService.swift; sourceTree = "<group>"; };
+		B10012 /* LocationSimulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationSimulator.swift; sourceTree = "<group>"; };
+		B10013 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
+		B10014 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		B10015 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		B10016 /* GeoMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoMath.swift; sourceTree = "<group>"; };
+		B10017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10018 /* GpsMocker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GpsMocker.entitlements; sourceTree = "<group>"; };
+		C10001 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
+		D10001 /* GpsMocker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GpsMocker.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E10001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10017 /* HealthKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F10001 = {
+			isa = PBXGroup;
+			children = (
+				F10002 /* GpsMocker */,
+				F10007 /* Products */,
+				F10008 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		F10002 /* GpsMocker */ = {
+			isa = PBXGroup;
+			children = (
+				B10001 /* GpsMockerApp.swift */,
+				B10002 /* ContentView.swift */,
+				F10003 /* Views */,
+				F10004 /* Models */,
+				F10005 /* Services */,
+				F10006 /* Utilities */,
+				B10017 /* Info.plist */,
+				B10018 /* GpsMocker.entitlements */,
+			);
+			path = GpsMocker;
+			sourceTree = "<group>";
+		};
+		F10003 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B10003 /* SimulationTab.swift */,
+				B10004 /* FlowerPotTab.swift */,
+				B10005 /* UIComponents.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		F10004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10006 /* LocationPreset.swift */,
+				B10007 /* FlowerPot.swift */,
+				B10008 /* RouteWaypoint.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		F10005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				B10009 /* DatabaseService.swift */,
+				B10010 /* OSRMService.swift */,
+				B10011 /* StepWriterService.swift */,
+				B10012 /* LocationSimulator.swift */,
+				B10013 /* LocationService.swift */,
+				B10014 /* UpdateChecker.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		F10006 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				B10015 /* Theme.swift */,
+				B10016 /* GeoMath.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		F10007 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D10001 /* GpsMocker.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F10008 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C10001 /* HealthKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		G10001 /* GpsMocker */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = H10003 /* Build configuration list for PBXNativeTarget "GpsMocker" */;
+			buildPhases = (
+				G10002 /* Sources */,
+				E10001 /* Frameworks */,
+				G10003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GpsMocker;
+			productName = GpsMocker;
+			productReference = D10001 /* GpsMocker.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		G10004 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					G10001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = H10001 /* Build configuration list for PBXProject "GpsMocker" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "zh-Hant";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				"zh-Hant",
+				Base,
+			);
+			mainGroup = F10001;
+			productRefGroup = F10007 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				G10001 /* GpsMocker */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		G10003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		G10002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10001 /* GpsMockerApp.swift in Sources */,
+				A10002 /* ContentView.swift in Sources */,
+				A10003 /* SimulationTab.swift in Sources */,
+				A10004 /* FlowerPotTab.swift in Sources */,
+				A10005 /* UIComponents.swift in Sources */,
+				A10006 /* LocationPreset.swift in Sources */,
+				A10007 /* FlowerPot.swift in Sources */,
+				A10008 /* RouteWaypoint.swift in Sources */,
+				A10009 /* DatabaseService.swift in Sources */,
+				A10010 /* OSRMService.swift in Sources */,
+				A10011 /* StepWriterService.swift in Sources */,
+				A10012 /* LocationSimulator.swift in Sources */,
+				A10013 /* LocationService.swift in Sources */,
+				A10014 /* UpdateChecker.swift in Sources */,
+				A10015 /* Theme.swift in Sources */,
+				A10016 /* GeoMath.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		H10004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		H10005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		H10006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GpsMocker/GpsMocker.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GpsMocker/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "GPS Mocker";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gpsmock.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		H10007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = GpsMocker/GpsMocker.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = GpsMocker/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "GPS Mocker";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gpsmock.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		H10001 /* Build configuration list for PBXProject "GpsMocker" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				H10004 /* Debug */,
+				H10005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		H10003 /* Build configuration list for PBXNativeTarget "GpsMocker" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				H10006 /* Debug */,
+				H10007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = G10004 /* Project object */;
+}
