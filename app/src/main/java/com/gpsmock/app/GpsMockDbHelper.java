@@ -12,7 +12,7 @@ import java.util.List;
 public class GpsMockDbHelper extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "gpsmock.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
 
     public static final String TABLE_PRESETS = "presets";
     public static final String COL_ID = "id";
@@ -52,7 +52,6 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
                 + COL_VALUE + " TEXT)");
 
         createFlowerPotsTable(db);
-        seedFlowerPots(db);
     }
 
     @Override
@@ -60,7 +59,9 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         // 增量升級：保留使用者的 presets / settings，只補上新表。
         if (oldVersion < 2) {
             createFlowerPotsTable(db);
-            seedFlowerPots(db);
+        }
+        if (oldVersion < 3) {
+            db.delete(TABLE_FLOWER_POTS, COL_CATEGORY + "=?", new String[]{CATEGORY_PERMANENT});
         }
     }
 
@@ -77,29 +78,6 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
                 + COL_CREATED_AT + " INTEGER NOT NULL)");
     }
 
-    private void seedFlowerPots(SQLiteDatabase db) {
-        // 常駐金盆種子點（來源：社群整理之 Pikmin Bloom 金盆常駐座標）
-        seedPot(db, "台北車站", 25.04852, 121.51419);
-        seedPot(db, "海港城（香港）", 22.29482, 114.16581);
-        seedPot(db, "K11 Musea（香港）", 22.294558, 114.174111);
-        seedPot(db, "LBuy（香港）", 22.323930, 114.172349);
-        seedPot(db, "Niantic Park（東京）", 35.675424, 139.71291);
-        seedPot(db, "京瓷球場（京都）", 35.01720, 135.58487);
-        seedPot(db, "宮島SA 皮克敏露台", 34.3653190, 132.3180220);
-    }
-
-    private void seedPot(SQLiteDatabase db, String name, double lat, double lng) {
-        ContentValues cv = new ContentValues();
-        cv.put(COL_NAME, name);
-        cv.put(COL_LAT, lat);
-        cv.put(COL_LNG, lng);
-        cv.put(COL_ORIG_LAT, lat);
-        cv.put(COL_ORIG_LNG, lng);
-        cv.put(COL_CATEGORY, CATEGORY_PERMANENT);
-        cv.put(COL_CORRECTED, 0);
-        cv.put(COL_CREATED_AT, System.currentTimeMillis());
-        db.insert(TABLE_FLOWER_POTS, null, cv);
-    }
 
     public long insertPreset(String name, double lat, double lng) {
         SQLiteDatabase db = getWritableDatabase();

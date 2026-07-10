@@ -1289,13 +1289,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             return;
         }
 
-        String shownCategory = null;
         for (GpsMockDbHelper.FlowerPot pot : pots) {
-            if (!pot.category.equals(shownCategory)) {
-                shownCategory = pot.category;
-                String label = GpsMockDbHelper.CATEGORY_PERMANENT.equals(pot.category) ? "常駐" : "活動";
-                potsContainer.addView(UIHelper.sectionHeader(this, label));
-            }
             potsContainer.addView(buildFlowerPotRow(pot));
         }
     }
@@ -1343,20 +1337,18 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         correctBtn.setOnClickListener(v -> showCorrectFlowerPotDialog(pot));
         row.addView(correctBtn);
 
-        if (GpsMockDbHelper.CATEGORY_EVENT.equals(pot.category)) {
-            Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
-            delBtn.setLayoutParams(presetButtonParams(gap));
-            delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
-                    .setTitle("刪除花盆")
-                    .setMessage("確定要刪除「" + pot.name + "」？")
-                    .setPositiveButton("刪除", (d, w) -> {
-                        dbHelper.deleteFlowerPot(pot.id);
-                        loadFlowerPots();
-                    })
-                    .setNegativeButton("取消", null)
-                    .show());
-            row.addView(delBtn);
-        }
+        Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
+        delBtn.setLayoutParams(presetButtonParams(gap));
+        delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("刪除花盆")
+                .setMessage("確定要刪除「" + pot.name + "」？")
+                .setPositiveButton("刪除", (d, w) -> {
+                    dbHelper.deleteFlowerPot(pot.id);
+                    loadFlowerPots();
+                })
+                .setNegativeButton("取消", null)
+                .show());
+        row.addView(delBtn);
 
         return row;
     }
