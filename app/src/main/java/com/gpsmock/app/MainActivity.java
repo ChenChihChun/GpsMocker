@@ -1252,6 +1252,18 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         addBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
         addBtn.setOnClickListener(v -> showAddFlowerPotDialog());
         btnRow.addView(addBtn);
+        Button delAllBtn = UIHelper.smallButton(this, "刪除全部", UIHelper.ACCENT_RED);
+        delAllBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        delAllBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("刪除所有花盆")
+                .setMessage("確定要刪除所有花盆點？此操作無法復原。")
+                .setPositiveButton("全部刪除", (d, w) -> {
+                    dbHelper.deleteAllFlowerPots();
+                    loadFlowerPots();
+                })
+                .setNegativeButton("取消", null)
+                .show());
+        btnRow.addView(delAllBtn);
         content.addView(btnRow);
 
         // 巡迴花盆按鈕

@@ -156,6 +156,10 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_ID + "=?", new String[]{String.valueOf(id)});
     }
 
+    public void deleteAllFlowerPots() {
+        getWritableDatabase().delete(TABLE_FLOWER_POTS, null, null);
+    }
+
     /** 修正花盆座標：更新 lat/lng 並標記為已修正，保留原始座標供復原。 */
     public void correctFlowerPot(long id, double lat, double lng) {
         SQLiteDatabase db = getWritableDatabase();
