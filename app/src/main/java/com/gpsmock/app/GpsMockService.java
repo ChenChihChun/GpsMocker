@@ -51,7 +51,10 @@ public class GpsMockService extends Service {
 
     private static final String CHANNEL_ID = "gps_mock_channel";
     private static final int NOTIFICATION_ID = 9527;
-    private static final String PROVIDER_NAME = LocationManager.GPS_PROVIDER;
+    private static final String[] MOCK_PROVIDERS = {
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER
+    };
     private static final long UPDATE_INTERVAL_MS = 1000;
 
     private static volatile boolean sIsRunning = false;
@@ -77,8 +80,9 @@ public class GpsMockService extends Service {
     private final List<Segment> segments = new ArrayList<>();
     private long totalDurationMs;
     private int curSeg;
-    private long segStartTimeMs;
+    private long segStartTimeMs; // uses SystemClock.elapsedRealtime()
     private float currentSpeed;
+    private int notifyCounter;
 
     /** 一段路線：折線點、累積距離、總距離、該段時間。 */
     private static class Segment {
@@ -110,7 +114,7 @@ public class GpsMockService extends Service {
             }
 
             Segment seg = segments.get(curSeg);
-            long now = System.currentTimeMillis();
+            long now = SystemClock.elapsedRealtime();
             long segElapsed = now - segStartTimeMs;
             double segFrac = seg.durationMs > 0 ? Math.min(1.0, (double) segElapsed / seg.durationMs) : 1.0;
 
@@ -138,7 +142,10 @@ public class GpsMockService extends Service {
             sProgress = overall;
 
             setMockLocation(pos[0], pos[1], bearing);
-            updateNotification(overall, pos[0], pos[1]);
+            notifyCounter++;
+            if (notifyCounter % 5 == 0 || segFrac >= 1.0) {
+                updateNotification(overall, pos[0], pos[1]);
+            }
 
             if (segFrac >= 1.0) {
                 if (curSeg < segments.size() - 1) {
@@ -276,26 +283,30 @@ public class GpsMockService extends Service {
 
     private boolean setupMockProvider() {
         try {
-            try {
-                locationManager.removeTestProvider(PROVIDER_NAME);
-            } catch (Exception ignored) {
-                // Provider may not exist yet; safe to ignore before re-adding.
-            }
+            for (String provider : MOCK_PROVIDERS) {
+                try {
+                    locationManager.removeTestProvider(provider);
+                } catch (SecurityException se) {
+                    Log.w(TAG, "SecurityException removing " + provider + ": " + se.getMessage());
+                } catch (Exception ignored) {
+                    // Provider may not exist yet; safe to ignore before re-adding.
+                }
 
-            if (Build.VERSION.SDK_INT >= 31) {
-                locationManager.addTestProvider(
-                        PROVIDER_NAME,
-                        false, false, false, false, true, true, true,
-                        ProviderProperties.POWER_USAGE_LOW,
-                        ProviderProperties.ACCURACY_FINE);
-            } else {
-                locationManager.addTestProvider(
-                        PROVIDER_NAME,
-                        false, false, false, false, true, true, true,
-                        Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
+                if (Build.VERSION.SDK_INT >= 31) {
+                    locationManager.addTestProvider(
+                            provider,
+                            false, false, false, false, true, true, true,
+                            ProviderProperties.POWER_USAGE_LOW,
+                            ProviderProperties.ACCURACY_FINE);
+                } else {
+                    locationManager.addTestProvider(
+                            provider,
+                            false, false, false, false, true, true, true,
+                            Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
+                }
+                locationManager.setTestProviderEnabled(provider, true);
+                Log.i(TAG, "Mock Provider setup success: " + provider);
             }
-            locationManager.setTestProviderEnabled(PROVIDER_NAME, true);
-            Log.i(TAG, "Mock Provider setup success");
             return true;
         } catch (SecurityException e) {
             Log.e(TAG, "Permission error: " + e.getMessage());
@@ -307,29 +318,36 @@ public class GpsMockService extends Service {
     }
 
     private void removeMockProvider() {
-        try {
-            locationManager.setTestProviderEnabled(PROVIDER_NAME, false);
-            locationManager.removeTestProvider(PROVIDER_NAME);
-        } catch (Exception ignored) {
-            // Provider may already be removed or unavailable during teardown.
+        for (String provider : MOCK_PROVIDERS) {
+            try {
+                locationManager.setTestProviderEnabled(provider, false);
+                locationManager.removeTestProvider(provider);
+            } catch (Exception ignored) {
+                // Provider may already be removed or unavailable during teardown.
+            }
         }
     }
 
     private void setMockLocation(double lat, double lng, double bearing) {
-        Location loc = new Location(PROVIDER_NAME);
-        loc.setLatitude(lat);
-        loc.setLongitude(lng);
-        loc.setAltitude(10.0);
-        loc.setAccuracy(3.0f);
-        loc.setBearing((float) bearing);
-        loc.setSpeed(currentSpeed);
-        loc.setTime(System.currentTimeMillis());
-        loc.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+        long time = System.currentTimeMillis();
+        long elapsedNanos = SystemClock.elapsedRealtimeNanos();
 
-        try {
-            locationManager.setTestProviderLocation(PROVIDER_NAME, loc);
-        } catch (Exception e) {
-            Log.e(TAG, "Set location failed: " + e.getMessage());
+        for (String provider : MOCK_PROVIDERS) {
+            Location loc = new Location(provider);
+            loc.setLatitude(lat);
+            loc.setLongitude(lng);
+            loc.setAltitude(10.0);
+            loc.setAccuracy(3.0f);
+            loc.setBearing((float) bearing);
+            loc.setSpeed(currentSpeed);
+            loc.setTime(time);
+            loc.setElapsedRealtimeNanos(elapsedNanos);
+
+            try {
+                locationManager.setTestProviderLocation(provider, loc);
+            } catch (Exception e) {
+                Log.e(TAG, "Set location failed for " + provider + ": " + e.getMessage());
+            }
         }
     }
 
@@ -501,7 +519,8 @@ public class GpsMockService extends Service {
 
     private void startSegmentedSimulation() {
         curSeg = 0;
-        segStartTimeMs = System.currentTimeMillis();
+        segStartTimeMs = SystemClock.elapsedRealtime();
+        notifyCounter = 0;
         handler.removeCallbacks(updateRunnable);
         handler.post(updateRunnable);
         Log.i(TAG, "Simulation started, segments=" + segments.size());
