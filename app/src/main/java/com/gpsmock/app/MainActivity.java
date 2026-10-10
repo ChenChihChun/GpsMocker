@@ -1670,7 +1670,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         content.addView(UIHelper.sectionHeader(this, "皮克敏菇點"));
 
         TextView hint = new TextView(this);
-        hint.setText("最快：在菇點地圖網站（例如 treelazy）複製大菇座標，切回本 App 會自動跳出「去打」。\n"
+        hint.setText("最快：往下到「線上大菇地圖」載入後直接按「去打」；或從其他網站複製座標，切回本 App 會自動跳出「去打」。\n"
                 + "菇點是固定的，大菇隨機長在菇點上。\n"
                 + "1. 走到或模擬到菇點附近，按「記錄目前位置」（模擬中也可按通知上的「記錄菇點」）\n"
                 + "2. 按「巡邏菇點」逐一查看，看到大菇時拉下通知按「標記大菇」，巡邏會暫停讓你加入，再按「繼續」\n"
@@ -1757,6 +1757,13 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         bigTourBtn.setLayoutParams(bigLp);
         bigTourBtn.setOnClickListener(v -> showBigMushroomTourDialog());
         content.addView(bigTourBtn);
+
+        buildOnlineSection(content);
+
+        View listGap = new View(this);
+        listGap.setLayoutParams(new LinearLayout.LayoutParams(1, UIHelper.dp(this, 12)));
+        content.addView(listGap);
+        content.addView(UIHelper.sectionHeader(this, "我的菇點"));
 
         mushContainer = new LinearLayout(this);
         mushContainer.setOrientation(LinearLayout.VERTICAL);
@@ -2206,6 +2213,318 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             }
         }
         return best;
+    }
+
+    // ---- 線上大菇（資料：樹懶生活 treelazy.com/pikmushroom） ----
+    // 資料是對方公開的靜態檔，依其條款註明出處；只在使用者按下時抓取，5 分鐘內不重抓，避免干擾對方網站。
+
+    private static final String ONLINE_MUSHROOM_URL = "https://treelazy.com/pikmushroom/data/mushrooms.json";
+    private static final String ONLINE_MUSHROOM_PAGE = "https://treelazy.com/pikmushroom";
+    private static final long ONLINE_MIN_REFRESH_MS = 5 * 60 * 1000;
+    private static final int ONLINE_MAX_ROWS = 60;
+
+    private static final String[] REGION_KEYS = {"", "auckland", "melaka", "suva", "apia", "nukualofa"};
+    private static final String[] REGION_LABELS = {"全部地區", "奧克蘭（紐西蘭）", "麻六甲（馬來西亞）",
+            "蘇瓦（斐濟）", "阿皮亞（薩摩亞）", "努瓜婁發（東加）"};
+
+    private static class OnlineMushroom {
+        double lat, lng;
+        String type, size, poi, region;
+        long verifiedAt;   // epoch ms，0 表示未知
+        long nextResetAt;  // 該地區下次重置（epoch ms），作為大菇到期時間
+        boolean fresh;     // 本輪（上次重置後）掃到的
+        boolean battle;    // 掃到當下有人在打
+    }
+
+    private final List<OnlineMushroom> onlineMushrooms = new java.util.ArrayList<>();
+    private long onlineFetchedAt = 0;
+    private boolean onlineBigOnly = true;
+    private boolean onlineFreshOnly = true;
+    private int onlineRegionIdx = 0;
+    private LinearLayout onlineContainer;
+    private TextView onlineStatusText;
+    private Button onlineSizeBtn, onlineFreshBtn, onlineRegionBtn;
+
+    private void buildOnlineSection(LinearLayout content) {
+        View gap = new View(this);
+        gap.setLayoutParams(new LinearLayout.LayoutParams(1, UIHelper.dp(this, 12)));
+        content.addView(gap);
+        content.addView(UIHelper.sectionHeader(this, "線上大菇地圖"));
+
+        TextView src = new TextView(this);
+        src.setText("資料來源：樹懶生活 treelazy.com/pikmushroom（非官方、定期掃描、非即時）。"
+                + "目前只涵蓋紐西蘭、馬來西亞麻六甲、斐濟、薩摩亞、東加。點此開啟原網站。");
+        src.setTextSize(12);
+        src.setTextColor(UIHelper.TEXT_HINT);
+        src.setPadding(0, 0, 0, UIHelper.dp(this, 8));
+        src.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(ONLINE_MUSHROOM_PAGE))));
+        content.addView(src);
+
+        LinearLayout filterRow = new LinearLayout(this);
+        filterRow.setOrientation(LinearLayout.HORIZONTAL);
+        onlineSizeBtn = UIHelper.smallButton(this, "", UIHelper.ACCENT_BLUE);
+        onlineSizeBtn.setOnClickListener(v -> {
+            onlineBigOnly = !onlineBigOnly;
+            renderOnlineMushrooms();
+        });
+        filterRow.addView(onlineSizeBtn);
+        onlineFreshBtn = UIHelper.smallButton(this, "", UIHelper.ACCENT_BLUE);
+        onlineFreshBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        onlineFreshBtn.setOnClickListener(v -> {
+            onlineFreshOnly = !onlineFreshOnly;
+            renderOnlineMushrooms();
+        });
+        filterRow.addView(onlineFreshBtn);
+        onlineRegionBtn = UIHelper.smallButton(this, "", UIHelper.ACCENT_BLUE);
+        onlineRegionBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        onlineRegionBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("選擇地區")
+                .setItems(REGION_LABELS, (d, w) -> {
+                    onlineRegionIdx = w;
+                    renderOnlineMushrooms();
+                })
+                .show());
+        filterRow.addView(onlineRegionBtn);
+        content.addView(filterRow);
+
+        Button loadBtn = UIHelper.primaryButton(this, "載入 / 重新整理線上大菇");
+        loadBtn.setBackground(UIHelper.roundRect(UIHelper.ACCENT_BLUE, 14, this));
+        LinearLayout.LayoutParams loadLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        loadLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        loadBtn.setLayoutParams(loadLp);
+        loadBtn.setOnClickListener(v -> fetchOnlineMushrooms());
+        content.addView(loadBtn);
+
+        onlineStatusText = new TextView(this);
+        onlineStatusText.setTextSize(12);
+        onlineStatusText.setTextColor(UIHelper.TEXT_SECONDARY);
+        onlineStatusText.setPadding(0, UIHelper.dp(this, 6), 0, 0);
+        content.addView(onlineStatusText);
+
+        onlineContainer = new LinearLayout(this);
+        onlineContainer.setOrientation(LinearLayout.VERTICAL);
+        content.addView(onlineContainer);
+
+        renderOnlineMushrooms();
+    }
+
+    private void fetchOnlineMushrooms() {
+        long now = System.currentTimeMillis();
+        if (!onlineMushrooms.isEmpty() && now - onlineFetchedAt < ONLINE_MIN_REFRESH_MS) {
+            Toast.makeText(this, "資料 5 分鐘內剛載入過，先用目前的", Toast.LENGTH_SHORT).show();
+            renderOnlineMushrooms();
+            return;
+        }
+        onlineStatusText.setText("載入中...");
+        new Thread(() -> {
+            try {
+                HttpURLConnection conn = (HttpURLConnection) new URL(ONLINE_MUSHROOM_URL).openConnection();
+                conn.setRequestProperty("User-Agent", "GpsMocker/" + getCurrentVersionName() + " Android");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(20000);
+                if (conn.getResponseCode() != 200) {
+                    throw new Exception("HTTP " + conn.getResponseCode());
+                }
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                }
+                List<OnlineMushroom> parsed = parseOnlineMushrooms(new JSONObject(sb.toString()));
+                runOnUiThread(() -> {
+                    onlineMushrooms.clear();
+                    onlineMushrooms.addAll(parsed);
+                    onlineFetchedAt = System.currentTimeMillis();
+                    renderOnlineMushrooms();
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Fetch online mushrooms failed: " + e.getMessage());
+                runOnUiThread(() -> onlineStatusText.setText("載入失敗：" + e.getMessage()));
+            }
+        }).start();
+    }
+
+    private static long parseIsoTime(String s) {
+        if (s == null || s.isEmpty() || "null".equals(s)) return 0;
+        try {
+            return java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 依 region_resets 時刻表（或 region_reset_hour 後備）算出該地區上次與下次重置時刻。 */
+    private static long[] resetWindow(JSONObject data, String region, long now) {
+        JSONObject resets = data.optJSONObject("region_resets");
+        JSONArray ts = resets != null ? resets.optJSONArray(region) : null;
+        if (ts == null && resets != null) ts = resets.optJSONArray(data.optString("reset_region", "auckland"));
+        long last = 0, next = 0;
+        if (ts != null) {
+            for (int i = 0; i < ts.length(); i++) {
+                long t = parseIsoTime(ts.optString(i));
+                if (t <= now) last = Math.max(last, t);
+                else if (next == 0 || t < next) next = t;
+            }
+        }
+        if (last == 0 || next == 0) {
+            // 時刻表過期時退回「每天 UTC 固定小時」推算
+            JSONObject hours = data.optJSONObject("region_reset_hour");
+            int hh = hours != null && hours.has(region) ? hours.optInt(region) : 14;
+            java.time.ZonedDateTime n = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneOffset.UTC);
+            java.time.ZonedDateTime r = n.toLocalDate().atTime(hh, 0).atZone(java.time.ZoneOffset.UTC);
+            if (n.isBefore(r)) r = r.minusDays(1);
+            last = r.toInstant().toEpochMilli();
+            next = r.plusDays(1).toInstant().toEpochMilli();
+        }
+        return new long[]{last, next};
+    }
+
+    private static List<OnlineMushroom> parseOnlineMushrooms(JSONObject data) throws Exception {
+        long now = System.currentTimeMillis();
+        java.util.Map<String, long[]> windows = new java.util.HashMap<>();
+        JSONArray arr = data.getJSONArray("mushrooms");
+        List<OnlineMushroom> list = new java.util.ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.getJSONObject(i);
+            if (!o.has("lat") || !o.has("lon")) continue;
+            OnlineMushroom m = new OnlineMushroom();
+            m.lat = o.getDouble("lat");
+            m.lng = o.getDouble("lon");
+            m.type = o.optString("type", "蘑菇");
+            m.size = o.optString("size", "");
+            m.poi = o.optString("poi", "");
+            m.region = o.optString("region", "auckland");
+            m.verifiedAt = parseIsoTime(o.optString("verified_at", ""));
+            m.battle = !o.isNull("battle_ends_at") && !o.optString("battle_ends_at", "").isEmpty();
+            long[] w = windows.get(m.region);
+            if (w == null) {
+                w = resetWindow(data, m.region, now);
+                windows.put(m.region, w);
+            }
+            m.fresh = m.verifiedAt > 0 && m.verifiedAt >= w[0];
+            m.nextResetAt = w[1];
+            list.add(m);
+        }
+        // 本輪在前、空閒在前、最新發現在前
+        Collections.sort(list, (a, b) -> {
+            if (a.fresh != b.fresh) return a.fresh ? -1 : 1;
+            if (a.battle != b.battle) return a.battle ? 1 : -1;
+            return Long.compare(b.verifiedAt, a.verifiedAt);
+        });
+        return list;
+    }
+
+    private void renderOnlineMushrooms() {
+        if (onlineContainer == null) return;
+        onlineSizeBtn.setText(onlineBigOnly ? "只看大/巨大" : "全部大小");
+        onlineFreshBtn.setText(onlineFreshOnly ? "只看本輪" : "含上一輪");
+        onlineRegionBtn.setText(REGION_LABELS[onlineRegionIdx]);
+        onlineContainer.removeAllViews();
+        if (onlineMushrooms.isEmpty()) {
+            if (onlineFetchedAt == 0) onlineStatusText.setText("尚未載入，按上方按鈕載入");
+            return;
+        }
+        String region = REGION_KEYS[onlineRegionIdx];
+        List<OnlineMushroom> shown = new java.util.ArrayList<>();
+        for (OnlineMushroom m : onlineMushrooms) {
+            if (onlineBigOnly && !("大".equals(m.size) || "巨大".equals(m.size))) continue;
+            if (onlineFreshOnly && !m.fresh) continue;
+            if (!region.isEmpty() && !region.equals(m.region)) continue;
+            shown.add(m);
+        }
+        String time = new java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(new java.util.Date(onlineFetchedAt));
+        onlineStatusText.setText(String.format("%s 載入，共 %d 朵，符合條件 %d 朵%s", time, onlineMushrooms.size(),
+                shown.size(), shown.size() > ONLINE_MAX_ROWS ? "（顯示前 " + ONLINE_MAX_ROWS + " 朵）" : ""));
+        for (int i = 0; i < shown.size() && i < ONLINE_MAX_ROWS; i++) {
+            onlineContainer.addView(buildOnlineRow(shown.get(i)));
+        }
+    }
+
+    private String regionLabel(String key) {
+        for (int i = 1; i < REGION_KEYS.length; i++) {
+            if (REGION_KEYS[i].equals(key)) return REGION_LABELS[i];
+        }
+        return key;
+    }
+
+    private View buildOnlineRow(OnlineMushroom m) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(UIHelper.roundRect(UIHelper.BG_CARD, 12, this));
+        int pad = UIHelper.dp(this, 12);
+        row.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
+        row.setLayoutParams(rowLp);
+        if (!m.fresh) row.setAlpha(0.6f);
+
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView title = new TextView(this);
+        title.setText(m.type + (m.size.isEmpty() ? "" : " · " + m.size));
+        title.setTextSize(14);
+        title.setTextColor("巨大".equals(m.size) || "大".equals(m.size)
+                ? Color.parseColor("#FF9800") : UIHelper.TEXT_PRIMARY);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        info.addView(title);
+
+        TextView poi = new TextView(this);
+        poi.setText((m.poi.isEmpty() ? "" : m.poi + "\n") + regionLabel(m.region));
+        poi.setTextSize(12);
+        poi.setTextColor(UIHelper.TEXT_SECONDARY);
+        info.addView(poi);
+
+        TextView state = new TextView(this);
+        String found = m.verifiedAt > 0
+                ? new java.text.SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(new java.util.Date(m.verifiedAt))
+                : "未知";
+        state.setText(String.format("%s · 發現 %s · %s", m.fresh ? "本輪" : "上一輪", found,
+                m.battle ? "掃到時戰鬥中" : "掃到時空閒"));
+        state.setTextSize(12);
+        state.setTextColor(m.battle ? UIHelper.ACCENT_RED : UIHelper.ACCENT_GREEN);
+        info.addView(state);
+        row.addView(info);
+
+        int gap = UIHelper.dp(this, 6);
+        Button goBtn = UIHelper.smallButton(this, "去打", UIHelper.ACCENT_GREEN);
+        goBtn.setLayoutParams(presetButtonParams(gap));
+        goBtn.setOnClickListener(v -> showGoFightDialog(saveOnlineSpot(m)));
+        row.addView(goBtn);
+
+        Button saveBtn = UIHelper.smallButton(this, "存", UIHelper.ACCENT_BLUE);
+        saveBtn.setLayoutParams(presetButtonParams(gap));
+        saveBtn.setOnClickListener(v -> {
+            saveOnlineSpot(m);
+            Toast.makeText(this, "已存到我的菇點（標記大菇到該地區重置）", Toast.LENGTH_SHORT).show();
+        });
+        row.addView(saveBtn);
+        return row;
+    }
+
+    /** 存成（或沿用附近既有的）菇點，標記大菇到該地區下次重置，回傳該菇點。 */
+    private GpsMockDbHelper.FlowerPot saveOnlineSpot(OnlineMushroom m) {
+        GpsMockDbHelper.FlowerPot spot = findNearbySpot(m.lat, m.lng, 30);
+        if (spot == null) {
+            String nm = m.type + (m.size.isEmpty() ? "" : "·" + m.size) + (m.poi.isEmpty() ? "" : " " + m.poi);
+            spot = new GpsMockDbHelper.FlowerPot();
+            spot.id = dbHelper.insertFlowerPot(nm, m.lat, m.lng, GpsMockDbHelper.CATEGORY_MUSHROOM);
+            spot.name = nm;
+            spot.lat = m.lat;
+            spot.lng = m.lng;
+        }
+        long expiresAt = m.nextResetAt > System.currentTimeMillis()
+                ? m.nextResetAt
+                : System.currentTimeMillis() + Math.round(getBigHours() * 3600_000);
+        dbHelper.setExpiresAt(spot.id, expiresAt);
+        spot.expiresAt = expiresAt;
+        loadMushrooms();
+        return spot;
     }
 
     // ---- 巡邏 / 去打 ----
