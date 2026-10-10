@@ -17,6 +17,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 
@@ -27,6 +28,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,8 +51,13 @@ public class GpsMockService extends Service {
     public static final String EXTRA_LNGS = "lngs";
     public static final String EXTRA_SEG_DURATIONS = "seg_durations";
     public static final String EXTRA_JUMP_MODE = "jump_mode";
+    // 跳點模式選用：每個停留點對應的菇點 id（長度 P），-1 表示非菇點（例如家）
+    public static final String EXTRA_STOP_IDS = "stop_ids";
 
     public static final String ACTION_STOP = "com.gpsmock.app.GPS_MOCK_STOP";
+    public static final String ACTION_TOGGLE_PAUSE = "com.gpsmock.app.GPS_MOCK_TOGGLE_PAUSE";
+    public static final String ACTION_MARK_BIG = "com.gpsmock.app.GPS_MOCK_MARK_BIG";
+    public static final String ACTION_RECORD_SPOT = "com.gpsmock.app.GPS_MOCK_RECORD_SPOT";
 
     private static final String CHANNEL_ID = "gps_mock_channel";
     private static final int NOTIFICATION_ID = 9527;
@@ -68,8 +77,10 @@ public class GpsMockService extends Service {
     private static volatile int sSegIndex = 0;
     private static volatile int sSegCount = 0;
     private static volatile boolean sJumpMode = false;
+    private static volatile boolean sPaused = false;
 
     private LocationManager locationManager;
+    private GpsMockDbHelper dbHelper;
     private Handler handler;
     private boolean hasArrived = false;
 
@@ -86,6 +97,9 @@ public class GpsMockService extends Service {
     private int notifyCounter;
     // 每次啟動遞增；背景抓路線完成時用來判斷結果是否已過期
     private int sessionId;
+    private long[] stopIds; // 跳點模式各停留點的菇點 id，可為 null
+    private boolean paused;
+    private long pausedAtMs;
 
     /** 一段路線：折線點、累積距離、總距離、該段時間。 */
     private static class Segment {
@@ -112,6 +126,14 @@ public class GpsMockService extends Service {
             }
 
             if (segments.isEmpty()) {
+                handler.postDelayed(this, UPDATE_INTERVAL_MS);
+                return;
+            }
+
+            if (paused) {
+                // 暫停：停在目前位置，計時凍結
+                currentSpeed = 0;
+                setMockLocation(sCurrentLat, sCurrentLng, 0);
                 handler.postDelayed(this, UPDATE_INTERVAL_MS);
                 return;
             }
@@ -170,6 +192,7 @@ public class GpsMockService extends Service {
     public void onCreate() {
         super.onCreate();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        dbHelper = new GpsMockDbHelper(this);
         handler = new Handler(Looper.getMainLooper());
         createNotificationChannel();
     }
@@ -189,6 +212,18 @@ public class GpsMockService extends Service {
             return START_NOT_STICKY;
         }
 
+        if (ACTION_TOGGLE_PAUSE.equals(intent.getAction())
+                || ACTION_MARK_BIG.equals(intent.getAction())
+                || ACTION_RECORD_SPOT.equals(intent.getAction())) {
+            if (!sIsRunning) {
+                // 服務已停止（殘留的通知），不重新啟動
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            handleNotificationAction(intent.getAction());
+            return START_NOT_STICKY;
+        }
+
         // startForegroundService 啟動後必須盡快呼叫 startForeground，
         // 否則即使接著 stopSelf 也會觸發 ForegroundServiceDidNotStartInTimeException
         sessionId++;
@@ -198,6 +233,10 @@ public class GpsMockService extends Service {
         fixedPoint = intent.getBooleanExtra(EXTRA_FIXED_POINT, false);
         followRoads = intent.getBooleanExtra(EXTRA_FOLLOW_ROADS, false);
         jumpMode = intent.getBooleanExtra(EXTRA_JUMP_MODE, false);
+
+        paused = false;
+        sPaused = false;
+        stopIds = null;
 
         double[] lats = intent.getDoubleArrayExtra(EXTRA_LATS);
         double[] lngs = intent.getDoubleArrayExtra(EXTRA_LNGS);
@@ -211,6 +250,10 @@ public class GpsMockService extends Service {
             ptLats = lats;
             ptLngs = lngs;
             durations = segDur;
+            long[] ids = intent.getLongArrayExtra(EXTRA_STOP_IDS);
+            if (ids != null && ids.length == lats.length) {
+                stopIds = ids;
+            }
         } else if (!fixedPoint && lats != null && lngs != null && segDur != null
                 && lats.length >= 2 && lngs.length == lats.length && segDur.length == lats.length - 1) {
             ptLats = lats;
@@ -292,6 +335,8 @@ public class GpsMockService extends Service {
         sIsRunning = false;
         sFixedPoint = false;
         sJumpMode = false;
+        sPaused = false;
+        dbHelper.close();
         handler.removeCallbacks(updateRunnable);
         removeMockProvider();
         Log.i(TAG, "Service stopped");
@@ -612,6 +657,75 @@ public class GpsMockService extends Service {
         return calculateBearing(p1[0], p1[1], p2[0], p2[1]);
     }
 
+    // ---- 通知按鈕 ----
+
+    private void handleNotificationAction(String action) {
+        if (ACTION_TOGGLE_PAUSE.equals(action)) {
+            setPaused(!paused);
+        } else if (ACTION_MARK_BIG.equals(action)) {
+            long id = currentStopId();
+            if (id < 0) return;
+            long expiresAt = System.currentTimeMillis() + Math.round(getBigHours() * 3600_000);
+            dbHelper.setExpiresAt(id, expiresAt);
+            setPaused(true); // 看到大菇通常要停下來加入
+            Toast.makeText(this, "已標記大菇，巡邏暫停", Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "Marked big mushroom at spot " + id);
+        } else if (ACTION_RECORD_SPOT.equals(action)) {
+            String name = "菇點 " + new SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(new Date());
+            dbHelper.insertFlowerPot(name, sCurrentLat, sCurrentLng, GpsMockDbHelper.CATEGORY_MUSHROOM);
+            Toast.makeText(this, "已記錄菇點", Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "Recorded spot at " + sCurrentLat + "," + sCurrentLng);
+        }
+        updateNotification(sProgress, sCurrentLat, sCurrentLng);
+    }
+
+    private void setPaused(boolean pause) {
+        if (pause == paused) return;
+        long now = SystemClock.elapsedRealtime();
+        if (pause) {
+            pausedAtMs = now;
+        } else {
+            segStartTimeMs += now - pausedAtMs; // 扣掉暫停的時間
+        }
+        paused = pause;
+        sPaused = pause;
+    }
+
+    /** 目前停留點對應的菇點 id；非巡邏或不是菇點時回傳 -1。 */
+    private long currentStopId() {
+        if (!jumpMode || stopIds == null || curSeg >= stopIds.length) return -1;
+        return stopIds[curSeg];
+    }
+
+    private double getBigHours() {
+        try {
+            return Double.parseDouble(dbHelper.getSetting(GpsMockDbHelper.KEY_BIG_HOURS, "2"));
+        } catch (NumberFormatException e) {
+            return 2;
+        }
+    }
+
+    private PendingIntent actionIntent(String action, int requestCode) {
+        Intent i = new Intent(this, GpsMockService.class);
+        i.setAction(action);
+        return PendingIntent.getService(
+                this, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /** 依模式加上通知按鈕（最多 3 個）：巡邏菇點時為 標記大菇/暫停/停止，其他為 記錄菇點/停止。 */
+    private void addActions(NotificationCompat.Builder b, PendingIntent stopPending) {
+        if (stopIds != null) {
+            if (currentStopId() >= 0) {
+                b.addAction(android.R.drawable.btn_star, "標記大菇", actionIntent(ACTION_MARK_BIG, 2));
+            }
+            b.addAction(android.R.drawable.ic_media_pause, paused ? "繼續" : "暫停",
+                    actionIntent(ACTION_TOGGLE_PAUSE, 3));
+        } else {
+            b.addAction(android.R.drawable.ic_menu_add, "記錄菇點", actionIntent(ACTION_RECORD_SPOT, 4));
+        }
+        b.addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPending);
+    }
+
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID, "GPS 模擬器",
@@ -631,14 +745,14 @@ public class GpsMockService extends Service {
                 this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         if (fixedPoint) {
-            return new NotificationCompat.Builder(this, CHANNEL_ID)
+            NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("GPS 定點模擬中")
                     .setContentText(String.format("位置: %.4f, %.4f", lat, lng))
                     .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                     .setOngoing(true)
-                    .setContentIntent(openPending)
-                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPending)
-                    .build();
+                    .setContentIntent(openPending);
+            addActions(b, stopPending);
+            return b.build();
         }
 
         int percent = (int) (progress * 100);
@@ -654,22 +768,24 @@ public class GpsMockService extends Service {
         if (hasArrived) {
             title = jumpMode ? "跳點巡迴 - 已完成" : "GPS 模擬 - 已到達";
         } else if (jumpMode) {
-            title = String.format("跳點巡迴中（第 %d/%d 點）", curSeg + 1, segments.size());
+            title = String.format("%s（第 %d/%d 點）%s", stopIds != null ? "巡邏菇點" : "跳點巡迴中",
+                    curSeg + 1, segments.size(), paused ? " 暫停中" : "");
         } else if (segments.size() > 1) {
             title = String.format("GPS 模擬中 %d%%（第 %d/%d 段）", percent, curSeg + 1, segments.size());
         } else {
             title = String.format("GPS 模擬中 %d%%", percent);
         }
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(statusText)
                 .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .setProgress(100, percent, false)
-                .setContentIntent(openPending)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPending)
-                .build();
+                .setContentIntent(openPending);
+        addActions(b, stopPending);
+        return b.build();
     }
 
     private void updateNotification(double progress, double lat, double lng) {
@@ -721,6 +837,10 @@ public class GpsMockService extends Service {
 
     public static boolean isJumpMode() {
         return sJumpMode;
+    }
+
+    public static boolean isPaused() {
+        return sPaused;
     }
 
     public static String getLastError() {

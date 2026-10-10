@@ -39,6 +39,8 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
     public static final String KEY_HOME_LAT = "home_lat";
     public static final String KEY_HOME_LNG = "home_lng";
     public static final String KEY_MUSHROOM_STAY_SEC = "mushroom_stay_sec";
+    public static final String KEY_PATROL_STAY_SEC = "patrol_stay_sec";
+    public static final String KEY_BIG_HOURS = "big_mushroom_hours";
 
     public GpsMockDbHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -154,7 +156,7 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         return insertFlowerPot(name, lat, lng, category, 0);
     }
 
-    /** expiresAt：到期時間（epoch ms），0 表示不會到期。 */
+    /** expiresAt：大菇到期時間（epoch ms），0 表示沒有大菇。 */
     public long insertFlowerPot(String name, double lat, double lng, String category, long expiresAt) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
@@ -183,14 +185,7 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_CATEGORY + "=?", new String[]{CATEGORY_MUSHROOM});
     }
 
-    /** 刪除已到期的大菇，回傳刪除筆數。 */
-    public int deleteExpiredMushrooms() {
-        return getWritableDatabase().delete(TABLE_FLOWER_POTS,
-                COL_CATEGORY + "=? AND " + COL_EXPIRES_AT + ">0 AND " + COL_EXPIRES_AT + "<?",
-                new String[]{CATEGORY_MUSHROOM, String.valueOf(System.currentTimeMillis())});
-    }
-
-    /** 更新大菇到期時間（epoch ms，0 表示不會到期）。 */
+    /** 設定菇點上大菇的到期時間（epoch ms，0 表示目前沒有大菇）。 */
     public void setExpiresAt(long id, long expiresAt) {
         ContentValues cv = new ContentValues();
         cv.put(COL_EXPIRES_AT, expiresAt);
@@ -261,8 +256,9 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         public boolean corrected;
         public long expiresAt;
 
-        public boolean isExpired() {
-            return expiresAt > 0 && expiresAt < System.currentTimeMillis();
+        /** 菇點目前標記有大菇且尚未到期。 */
+        public boolean hasBigMushroom() {
+            return expiresAt > System.currentTimeMillis();
         }
     }
 }
