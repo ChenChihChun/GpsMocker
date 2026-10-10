@@ -42,6 +42,7 @@ public class GpsMockService extends Service {
     public static final String EXTRA_FOLLOW_ROADS = "follow_roads";
     public static final String EXTRA_FIXED_POINT = "fixed_point";
     // 多點路線：所有點的經緯度（長度 P）與每段時間（長度 P-1）
+    // 跳點模式：每個點各一個停留時間（長度 P），依序定位到每個點並停留
     public static final String EXTRA_LATS = "lats";
     public static final String EXTRA_LNGS = "lngs";
     public static final String EXTRA_SEG_DURATIONS = "seg_durations";
@@ -83,6 +84,8 @@ public class GpsMockService extends Service {
     private long segStartTimeMs; // uses SystemClock.elapsedRealtime()
     private float currentSpeed;
     private int notifyCounter;
+    // 每次啟動遞增；背景抓路線完成時用來判斷結果是否已過期
+    private int sessionId;
 
     /** 一段路線：折線點、累積距離、總距離、該段時間。 */
     private static class Segment {
@@ -121,8 +124,8 @@ public class GpsMockService extends Service {
             double[] pos;
             double bearing;
             if (jumpMode) {
-                // 跳點模式：直接定位在該段終點，等待 durationMs 後跳到下一段
-                pos = seg.points.get(seg.points.size() - 1);
+                // 跳點模式：定位在該停留點，等待 durationMs 後跳到下一點
+                pos = seg.points.get(0);
                 bearing = 0;
                 currentSpeed = 0;
             } else {
@@ -174,6 +177,8 @@ public class GpsMockService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) {
+            startForeground(NOTIFICATION_ID, buildNotification(0, 0, 0));
+            stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -183,6 +188,12 @@ public class GpsMockService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+
+        // startForegroundService 啟動後必須盡快呼叫 startForeground，
+        // 否則即使接著 stopSelf 也會觸發 ForegroundServiceDidNotStartInTimeException
+        sessionId++;
+        handler.removeCallbacks(updateRunnable);
+        startForeground(NOTIFICATION_ID, buildNotification(0, sCurrentLat, sCurrentLng));
 
         fixedPoint = intent.getBooleanExtra(EXTRA_FIXED_POINT, false);
         followRoads = intent.getBooleanExtra(EXTRA_FOLLOW_ROADS, false);
@@ -195,7 +206,12 @@ public class GpsMockService extends Service {
         double[] ptLats;
         double[] ptLngs;
         long[] durations;
-        if (!fixedPoint && lats != null && lngs != null && segDur != null
+        if (jumpMode && !fixedPoint && lats != null && lngs != null && segDur != null
+                && lats.length >= 1 && lngs.length == lats.length && segDur.length == lats.length) {
+            ptLats = lats;
+            ptLngs = lngs;
+            durations = segDur;
+        } else if (!fixedPoint && lats != null && lngs != null && segDur != null
                 && lats.length >= 2 && lngs.length == lats.length && segDur.length == lats.length - 1) {
             ptLats = lats;
             ptLngs = lngs;
@@ -234,6 +250,8 @@ public class GpsMockService extends Service {
         if (!setupMockProvider()) {
             sLastError = "請在「設定 > 開發者選項 > 選取模擬位置應用程式」中選擇 GPS 模擬器";
             Log.e(TAG, "Cannot setup Mock Provider: " + sLastError);
+            sIsRunning = false;
+            stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -255,6 +273,9 @@ public class GpsMockService extends Service {
         if (fixedPoint) {
             segments.clear();
             startSegmentedSimulation();
+        } else if (jumpMode) {
+            buildStopSegments(ptLats, ptLngs, durations);
+            startSegmentedSimulation();
         } else if (followRoads) {
             fetchSegmentsAndStart(ptLats, ptLngs, durations);
         } else {
@@ -267,6 +288,7 @@ public class GpsMockService extends Service {
 
     @Override
     public void onDestroy() {
+        sessionId++;
         sIsRunning = false;
         sFixedPoint = false;
         sJumpMode = false;
@@ -443,8 +465,22 @@ public class GpsMockService extends Service {
         }
     }
 
+    /** 跳點模式：每個點各成一段（起訖同點），停留該點的時間。 */
+    private void buildStopSegments(double[] ptLats, double[] ptLngs, long[] durations) {
+        segments.clear();
+        for (int i = 0; i < durations.length; i++) {
+            Segment seg = new Segment();
+            seg.points.add(new double[]{ptLats[i], ptLngs[i]});
+            seg.points.add(new double[]{ptLats[i], ptLngs[i]});
+            seg.durationMs = durations[i];
+            computeCumDist(seg);
+            segments.add(seg);
+        }
+    }
+
     private void fetchSegmentsAndStart(double[] ptLats, double[] ptLngs, long[] durations) {
         Log.i(TAG, "Fetching OSRM routes for " + durations.length + " segments...");
+        final int session = sessionId;
         new Thread(() -> {
             List<Segment> built = new ArrayList<>();
             for (int i = 0; i < durations.length; i++) {
@@ -461,6 +497,10 @@ public class GpsMockService extends Service {
                 built.add(seg);
             }
             handler.post(() -> {
+                if (session != sessionId || !sIsRunning) {
+                    Log.i(TAG, "Discard stale OSRM result");
+                    return;
+                }
                 segments.clear();
                 segments.addAll(built);
                 startSegmentedSimulation();

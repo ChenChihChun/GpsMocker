@@ -79,6 +79,10 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     private View simTabView;
     private View potTabView;
     private LinearLayout potsContainer;
+    private Button tabMushBtn;
+    private View mushTabView;
+    private LinearLayout mushContainer;
+    private TextView homeText;
 
     private double currentLat = 0, currentLng = 0;
     private boolean hasLocation = false;
@@ -564,7 +568,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         scrollView.addView(content);
         simTabView = scrollView;
 
-        // 頂部分頁列（模擬 / 金色花盆）
+        // 頂部分頁列（模擬 / 金色花盆 / 大菇）
         LinearLayout tabBar = new LinearLayout(this);
         tabBar.setOrientation(LinearLayout.HORIZONTAL);
         tabBar.setBackgroundColor(UIHelper.BG_TOP_BAR);
@@ -572,18 +576,24 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         tabBar.setPadding(tabPad, tabPad, tabPad, tabPad);
         tabSimBtn = tabButton("模擬");
         tabPotBtn = tabButton("金色花盆");
+        tabMushBtn = tabButton("大菇");
         tabSimBtn.setOnClickListener(v -> selectTab(0));
         tabPotBtn.setOnClickListener(v -> selectTab(1));
+        tabMushBtn.setOnClickListener(v -> selectTab(2));
         tabBar.addView(tabSimBtn);
         tabBar.addView(tabPotBtn);
+        tabBar.addView(tabMushBtn);
         root.addView(tabBar);
 
-        // 內容容器：兩個分頁疊在一起，切換 visibility
+        // 內容容器：分頁疊在一起，切換 visibility
         FrameLayout contentFrame = new FrameLayout(this);
         potTabView = buildFlowerPotTab();
+        mushTabView = buildMushroomTab();
         contentFrame.addView(simTabView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         contentFrame.addView(potTabView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        contentFrame.addView(mushTabView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(contentFrame, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
@@ -593,6 +603,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         selectTab(0);
         loadPresets();
         loadFlowerPots();
+        loadMushrooms();
         renderWaypoints();
         checkAndRequestPermission();
 
@@ -617,11 +628,15 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     }
 
     private void selectTab(int index) {
-        boolean sim = index == 0;
-        simTabView.setVisibility(sim ? View.VISIBLE : View.GONE);
-        potTabView.setVisibility(sim ? View.GONE : View.VISIBLE);
-        styleTab(tabSimBtn, sim);
-        styleTab(tabPotBtn, !sim);
+        simTabView.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        potTabView.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        mushTabView.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
+        styleTab(tabSimBtn, index == 0);
+        styleTab(tabPotBtn, index == 1);
+        styleTab(tabMushBtn, index == 2);
+        if (index == 2) {
+            loadMushrooms(); // 刷新距離與剩餘時間
+        }
     }
 
     private void styleTab(Button btn, boolean selected) {
@@ -1288,6 +1303,12 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         return scroll;
     }
 
+    /** 花盆與大菇共用修正對話框，修改後兩邊都刷新。 */
+    private void refreshPotLists() {
+        loadFlowerPots();
+        loadMushrooms();
+    }
+
     private void loadFlowerPots() {
         potsContainer.removeAllViews();
         List<GpsMockDbHelper.FlowerPot> pots = dbHelper.getAllFlowerPots();
@@ -1494,7 +1515,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                     }
                     dbHelper.correctFlowerPot(pot.id, ll[0], ll[1]);
                     Toast.makeText(this, "已修正", Toast.LENGTH_SHORT).show();
-                    loadFlowerPots();
+                    refreshPotLists();
                 })
                 .setNegativeButton("取消", null);
 
@@ -1502,7 +1523,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             b.setNeutralButton("復原", (d, w) -> {
                 dbHelper.revertFlowerPot(pot.id);
                 Toast.makeText(this, "已復原", Toast.LENGTH_SHORT).show();
-                loadFlowerPots();
+                refreshPotLists();
             });
         }
         b.show();
@@ -1594,43 +1615,31 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     }
 
     private void startFlowerPotTour(List<GpsMockDbHelper.FlowerPot> pots, int intervalSec) {
-        // 起點 = 第一個花盆，加一段自己到自己讓第一個花盆也有停留時間
-        // 結構：[P0→P0(停留), P0→P1(停留), P1→P2(停留), ...]
-        GpsMockDbHelper.FlowerPot first = pots.get(0);
-
-        int totalPoints = pots.size() + 1; // 多一個起點自環
-        double[] lats = new double[totalPoints];
-        double[] lngs = new double[totalPoints];
-        long[] segDur = new long[totalPoints - 1];
-
-        long intervalMs = intervalSec * 1000L;
-
-        // 第 0 點 = 起點（第一個花盆）
-        lats[0] = first.lat;
-        lngs[0] = first.lng;
-        // 第 1 點 = 同一個花盆（自環，讓跳點模式在此停留）
-        lats[1] = first.lat;
-        lngs[1] = first.lng;
-        segDur[0] = intervalMs;
-
-        for (int i = 1; i < pots.size(); i++) {
-            GpsMockDbHelper.FlowerPot pot = pots.get(i);
-            lats[i + 1] = pot.lat;
-            lngs[i + 1] = pot.lng;
-            segDur[i] = intervalMs;
+        double[] lats = new double[pots.size()];
+        double[] lngs = new double[pots.size()];
+        long[] stayMs = new long[pots.size()];
+        for (int i = 0; i < pots.size(); i++) {
+            lats[i] = pots.get(i).lat;
+            lngs[i] = pots.get(i).lng;
+            stayMs[i] = intervalSec * 1000L;
         }
+        startJumpTour(lats, lngs, stayMs);
 
+        Toast.makeText(this, String.format("開始巡迴 %d 個花盆（每點 %d 秒）", pots.size(), intervalSec),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** 跳點模式：依序定位到每個點，各停留 stayMs[i]。最後一點會持續停留直到停止。 */
+    private void startJumpTour(double[] lats, double[] lngs, long[] stayMs) {
         Intent intent = new Intent(this, GpsMockService.class);
         intent.putExtra(GpsMockService.EXTRA_LATS, lats);
         intent.putExtra(GpsMockService.EXTRA_LNGS, lngs);
-        intent.putExtra(GpsMockService.EXTRA_SEG_DURATIONS, segDur);
+        intent.putExtra(GpsMockService.EXTRA_SEG_DURATIONS, stayMs);
         intent.putExtra(GpsMockService.EXTRA_FOLLOW_ROADS, false);
         intent.putExtra(GpsMockService.EXTRA_FIXED_POINT, false);
         intent.putExtra(GpsMockService.EXTRA_JUMP_MODE, true);
         startForegroundService(intent);
 
-        Toast.makeText(this, String.format("開始巡迴 %d 個花盆（每點 %d 秒）", pots.size(), intervalSec),
-                Toast.LENGTH_SHORT).show();
         selectTab(0); // 切回模擬分頁看狀態
         uiHandler.postDelayed(() -> {
             updateButtonState();
@@ -1638,6 +1647,574 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
                 uiHandler.post(statusUpdateRunnable);
             }
         }, 500);
+    }
+
+    // ===================== 皮克敏大菇分頁 =====================
+
+    private ScrollView buildMushroomTab() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        content.setPadding(p, p, p, p);
+
+        content.addView(UIHelper.sectionHeader(this, "皮克敏大菇"));
+
+        TextView hint = new TextView(this);
+        hint.setText("「去打」會跳到大菇停留幾秒讓你加入，再自動跳回家。點名稱可設定剩餘時間，過期會變灰。");
+        hint.setTextSize(12);
+        hint.setTextColor(UIHelper.TEXT_HINT);
+        hint.setPadding(0, 0, 0, UIHelper.dp(this, 8));
+        content.addView(hint);
+
+        // 家（打完回到這裡）
+        LinearLayout homeRow = new LinearLayout(this);
+        homeRow.setOrientation(LinearLayout.HORIZONTAL);
+        homeRow.setGravity(Gravity.CENTER_VERTICAL);
+        homeRow.setBackground(UIHelper.roundRect(UIHelper.BG_CARD, 12, this));
+        int hp = UIHelper.dp(this, 12);
+        homeRow.setPadding(hp, hp, hp, hp);
+        homeText = new TextView(this);
+        homeText.setTextSize(13);
+        homeText.setTextColor(UIHelper.TEXT_PRIMARY);
+        homeText.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        homeRow.addView(homeText);
+        Button homeBtn = UIHelper.smallButton(this, "設定家", UIHelper.ACCENT_BLUE);
+        homeBtn.setOnClickListener(v -> showSetHomeDialog());
+        homeRow.addView(homeBtn);
+        content.addView(homeRow);
+        updateHomeText();
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setPadding(0, UIHelper.dp(this, 8), 0, 0);
+        Button importBtn = UIHelper.smallButton(this, "匯入/貼上", UIHelper.ACCENT_BLUE);
+        importBtn.setOnClickListener(v -> showImportMushroomsDialog());
+        btnRow.addView(importBtn);
+        Button addBtn = UIHelper.smallButton(this, "+ 新增", UIHelper.ACCENT_GREEN);
+        addBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        addBtn.setOnClickListener(v -> showAddMushroomDialog());
+        btnRow.addView(addBtn);
+        Button clearExpiredBtn = UIHelper.smallButton(this, "清除過期", Color.parseColor("#FF6F00"));
+        clearExpiredBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        clearExpiredBtn.setOnClickListener(v -> {
+            int n = dbHelper.deleteExpiredMushrooms();
+            Toast.makeText(this, "已清除 " + n + " 個過期大菇", Toast.LENGTH_SHORT).show();
+            loadMushrooms();
+        });
+        btnRow.addView(clearExpiredBtn);
+        Button delAllBtn = UIHelper.smallButton(this, "刪除全部", UIHelper.ACCENT_RED);
+        delAllBtn.setLayoutParams(presetButtonParams(UIHelper.dp(this, 8)));
+        delAllBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("刪除所有大菇")
+                .setMessage("確定要刪除所有大菇？此操作無法復原。")
+                .setPositiveButton("全部刪除", (d, w) -> {
+                    dbHelper.deleteAllMushrooms();
+                    loadMushrooms();
+                })
+                .setNegativeButton("取消", null)
+                .show());
+        btnRow.addView(delAllBtn);
+        content.addView(btnRow);
+
+        Button tourBtn = UIHelper.primaryButton(this, "巡迴所有大菇（依距離排序）");
+        tourBtn.setBackground(UIHelper.roundRect(Color.parseColor("#8E24AA"), 14, this));
+        LinearLayout.LayoutParams tourLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tourLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        tourBtn.setLayoutParams(tourLp);
+        tourBtn.setOnClickListener(v -> showMushroomTourDialog());
+        content.addView(tourBtn);
+
+        mushContainer = new LinearLayout(this);
+        mushContainer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams mcLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mcLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        mushContainer.setLayoutParams(mcLp);
+        content.addView(mushContainer);
+
+        scroll.addView(content);
+        return scroll;
+    }
+
+    private void loadMushrooms() {
+        if (mushContainer == null) return;
+        mushContainer.removeAllViews();
+        List<GpsMockDbHelper.FlowerPot> list = dbHelper.getAllMushrooms();
+        if (list.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("尚無大菇");
+            empty.setTextColor(UIHelper.TEXT_HINT);
+            empty.setTextSize(13);
+            empty.setPadding(0, UIHelper.dp(this, 8), 0, 0);
+            mushContainer.addView(empty);
+            return;
+        }
+        double[] ref = getReferencePosition();
+        for (GpsMockDbHelper.FlowerPot m : list) {
+            mushContainer.addView(buildMushroomRow(m, ref));
+        }
+    }
+
+    private View buildMushroomRow(GpsMockDbHelper.FlowerPot m, double[] ref) {
+        boolean expired = m.isExpired();
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(UIHelper.roundRect(UIHelper.BG_CARD, 12, this));
+        int pad = UIHelper.dp(this, 12);
+        row.setPadding(pad, pad, pad, pad);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, UIHelper.dp(this, 4), 0, UIHelper.dp(this, 4));
+        row.setLayoutParams(rowLp);
+        if (expired) row.setAlpha(0.45f);
+
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        info.setOnClickListener(v -> showMushroomExpiryDialog(m));
+
+        TextView name = new TextView(this);
+        name.setText(m.corrected ? m.name + "（已修正）" : m.name);
+        name.setTextSize(14);
+        name.setTextColor(UIHelper.TEXT_PRIMARY);
+        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+
+        StringBuilder sub = new StringBuilder(String.format("%.5f, %.5f", m.lat, m.lng));
+        if (ref != null) {
+            sub.append(" · ").append(formatDistance(distanceMeters(ref[0], ref[1], m.lat, m.lng)));
+        }
+        TextView coords = new TextView(this);
+        coords.setText(sub.toString());
+        coords.setTextSize(12);
+        coords.setTextColor(UIHelper.TEXT_SECONDARY);
+
+        TextView expiry = new TextView(this);
+        expiry.setTextSize(12);
+        if (m.expiresAt <= 0) {
+            expiry.setText("剩餘時間：未設定");
+            expiry.setTextColor(UIHelper.TEXT_HINT);
+        } else if (expired) {
+            expiry.setText("已過期");
+            expiry.setTextColor(UIHelper.ACCENT_RED);
+        } else {
+            expiry.setText("剩餘 " + formatRemaining(m.expiresAt - System.currentTimeMillis()));
+            expiry.setTextColor(UIHelper.ACCENT_GREEN);
+        }
+
+        info.addView(name);
+        info.addView(coords);
+        info.addView(expiry);
+        row.addView(info);
+
+        int gap = UIHelper.dp(this, 6);
+
+        Button goBtn = UIHelper.smallButton(this, "去打", UIHelper.ACCENT_GREEN);
+        goBtn.setLayoutParams(presetButtonParams(gap));
+        goBtn.setOnClickListener(v -> showGoFightDialog(m));
+        row.addView(goBtn);
+
+        Button correctBtn = UIHelper.smallButton(this, "修正", UIHelper.ACCENT_BLUE);
+        correctBtn.setLayoutParams(presetButtonParams(gap));
+        correctBtn.setOnClickListener(v -> showCorrectFlowerPotDialog(m));
+        row.addView(correctBtn);
+
+        Button delBtn = UIHelper.smallButton(this, "刪", UIHelper.ACCENT_RED);
+        delBtn.setLayoutParams(presetButtonParams(gap));
+        delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("刪除大菇")
+                .setMessage("確定要刪除「" + m.name + "」？")
+                .setPositiveButton("刪除", (d, w) -> {
+                    dbHelper.deleteFlowerPot(m.id);
+                    loadMushrooms();
+                })
+                .setNegativeButton("取消", null)
+                .show());
+        row.addView(delBtn);
+
+        return row;
+    }
+
+    /** 計算距離用的參考位置：模擬中用模擬位置，否則用實際 GPS；都沒有回傳 null。 */
+    private double[] getReferencePosition() {
+        if (GpsMockService.isRunning()) {
+            return new double[]{GpsMockService.getCurrentLat(), GpsMockService.getCurrentLng()};
+        }
+        if (hasLocation) {
+            return new double[]{currentLat, currentLng};
+        }
+        return null;
+    }
+
+    private static double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
+        float[] r = new float[1];
+        Location.distanceBetween(lat1, lng1, lat2, lng2, r);
+        return r[0];
+    }
+
+    private static String formatDistance(double meters) {
+        if (meters >= 1000) {
+            return String.format("%.1f km", meters / 1000);
+        }
+        return String.format("%d m", Math.round(meters));
+    }
+
+    private static String formatRemaining(long ms) {
+        long minutes = Math.max(0, ms) / 60000;
+        if (minutes >= 60) {
+            return String.format("%d 小時 %d 分", minutes / 60, minutes % 60);
+        }
+        return minutes + " 分";
+    }
+
+    /** 解析剩餘時數，回傳到期時間（epoch ms）；空白回傳 0（不設定），格式錯誤回傳 -1。 */
+    private static long parseExpiryHours(String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) return 0;
+        try {
+            double h = Double.parseDouble(t);
+            if (h <= 0) return 0;
+            return System.currentTimeMillis() + Math.round(h * 3600_000);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private EditText hoursInput(String hint) {
+        EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setHint(hint);
+        return input;
+    }
+
+    // ---- 家 ----
+
+    private double[] getHome() {
+        String lat = dbHelper.getSetting(GpsMockDbHelper.KEY_HOME_LAT, null);
+        String lng = dbHelper.getSetting(GpsMockDbHelper.KEY_HOME_LNG, null);
+        if (lat == null || lng == null) return null;
+        try {
+            return new double[]{Double.parseDouble(lat), Double.parseDouble(lng)};
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private void updateHomeText() {
+        double[] home = getHome();
+        homeText.setText(home == null
+                ? "家：未設定（打完不會自動跳回）"
+                : String.format("家：%.5f, %.5f", home[0], home[1]));
+    }
+
+    private void showSetHomeDialog() {
+        EditText input = new EditText(this);
+        input.setHint("lat, lng 或 Google 地圖網址");
+        double[] home = getHome();
+        if (home != null) {
+            input.setText(String.format("%.6f, %.6f", home[0], home[1]));
+        } else if (hasLocation) {
+            input.setText(String.format("%.6f, %.6f", currentLat, currentLng));
+        }
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("設定家（打完大菇回到這裡）")
+                .setView(input)
+                .setPositiveButton("儲存", (d, w) -> {
+                    double[] ll = parseLatLng(input.getText().toString());
+                    if (ll == null) {
+                        Toast.makeText(this, "座標格式無法解析", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dbHelper.setSetting(GpsMockDbHelper.KEY_HOME_LAT, String.valueOf(ll[0]));
+                    dbHelper.setSetting(GpsMockDbHelper.KEY_HOME_LNG, String.valueOf(ll[1]));
+                    updateHomeText();
+                })
+                .setNegativeButton("取消", null);
+        if (hasLocation) {
+            b.setNeutralButton("用目前 GPS", (d, w) -> {
+                dbHelper.setSetting(GpsMockDbHelper.KEY_HOME_LAT, String.valueOf(currentLat));
+                dbHelper.setSetting(GpsMockDbHelper.KEY_HOME_LNG, String.valueOf(currentLng));
+                updateHomeText();
+            });
+        }
+        b.show();
+    }
+
+    // ---- 新增 / 匯入 / 到期 ----
+
+    private void showAddMushroomDialog() {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, 0, p, 0);
+
+        EditText nameInput = new EditText(this);
+        nameInput.setHint("名稱（例：紅色大菇 公園）");
+        col.addView(nameInput);
+
+        EditText coordInput = new EditText(this);
+        coordInput.setHint("lat, lng 或 Google 地圖網址");
+        col.addView(coordInput);
+
+        EditText hours = hoursInput("剩餘幾小時（可留空）");
+        col.addView(hours);
+
+        new AlertDialog.Builder(this)
+                .setTitle("新增大菇")
+                .setView(col)
+                .setPositiveButton("新增", (d, w) -> {
+                    double[] ll = parseLatLng(coordInput.getText().toString());
+                    if (ll == null) {
+                        Toast.makeText(this, "座標格式無法解析", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    long expiresAt = parseExpiryHours(hours.getText().toString());
+                    if (expiresAt < 0) {
+                        Toast.makeText(this, "剩餘時數格式錯誤，已略過", Toast.LENGTH_SHORT).show();
+                        expiresAt = 0;
+                    }
+                    String nm = nameInput.getText().toString().trim();
+                    if (nm.isEmpty()) nm = String.format("大菇 %.4f, %.4f", ll[0], ll[1]);
+                    dbHelper.insertFlowerPot(nm, ll[0], ll[1], GpsMockDbHelper.CATEGORY_MUSHROOM, expiresAt);
+                    loadMushrooms();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showImportMushroomsDialog() {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, 0, p, 0);
+
+        EditText input = new EditText(this);
+        input.setHint("每行一筆，含座標即可\n例: 紅色大菇 25.04852, 121.51419");
+        input.setMinLines(5);
+        input.setGravity(Gravity.TOP);
+        col.addView(input);
+
+        EditText hours = hoursInput("全部剩餘幾小時（可留空）");
+        col.addView(hours);
+
+        new AlertDialog.Builder(this)
+                .setTitle("匯入大菇座標")
+                .setView(col)
+                .setPositiveButton("匯入", (d, w) -> {
+                    long expiresAt = parseExpiryHours(hours.getText().toString());
+                    if (expiresAt < 0) expiresAt = 0;
+                    int count = 0;
+                    for (String line : input.getText().toString().split("\\n")) {
+                        if (line.trim().isEmpty()) continue;
+                        double[] ll = parseLatLng(line);
+                        if (ll == null) continue;
+                        String nm = line.replaceAll("-?\\d{1,3}\\.\\d+", "").replaceAll("[,;|\\s]+", " ").trim();
+                        if (nm.isEmpty()) nm = String.format("大菇 %.4f, %.4f", ll[0], ll[1]);
+                        dbHelper.insertFlowerPot(nm, ll[0], ll[1], GpsMockDbHelper.CATEGORY_MUSHROOM, expiresAt);
+                        count++;
+                    }
+                    Toast.makeText(this, "已匯入 " + count + " 個大菇", Toast.LENGTH_SHORT).show();
+                    loadMushrooms();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showMushroomExpiryDialog(GpsMockDbHelper.FlowerPot m) {
+        EditText hours = hoursInput("從現在起剩幾小時（例：2.5）");
+        new AlertDialog.Builder(this)
+                .setTitle("「" + m.name + "」剩餘時間")
+                .setView(hours)
+                .setPositiveButton("儲存", (d, w) -> {
+                    long expiresAt = parseExpiryHours(hours.getText().toString());
+                    if (expiresAt < 0) {
+                        Toast.makeText(this, "請輸入有效數字", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    dbHelper.setExpiresAt(m.id, expiresAt);
+                    loadMushrooms();
+                })
+                .setNeutralButton("清除時間", (d, w) -> {
+                    dbHelper.setExpiresAt(m.id, 0);
+                    loadMushrooms();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ---- 去打 / 巡迴 ----
+
+    private int getMushroomStaySec() {
+        try {
+            return Integer.parseInt(dbHelper.getSetting(GpsMockDbHelper.KEY_MUSHROOM_STAY_SEC, "60"));
+        } catch (NumberFormatException e) {
+            return 60;
+        }
+    }
+
+    /** 停留秒數 + 打完回家 的共用對話框內容。 */
+    private static class StayOptions {
+        EditText staySec;
+        CheckBox returnHome;
+    }
+
+    private LinearLayout buildStayOptionsView(StayOptions opts) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, UIHelper.dp(this, 8), p, 0);
+
+        TextView label = new TextView(this);
+        label.setText("每朵停留秒數（加入戰鬥用）");
+        label.setTextColor(UIHelper.TEXT_SECONDARY);
+        col.addView(label);
+
+        opts.staySec = new EditText(this);
+        opts.staySec.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        opts.staySec.setText(String.valueOf(getMushroomStaySec()));
+        opts.staySec.setSelectAllOnFocus(true);
+        col.addView(opts.staySec);
+
+        opts.returnHome = new CheckBox(this);
+        opts.returnHome.setText("打完自動跳回家");
+        opts.returnHome.setButtonTintList(android.content.res.ColorStateList.valueOf(UIHelper.ACCENT_GREEN));
+        boolean hasHome = getHome() != null;
+        opts.returnHome.setChecked(hasHome);
+        opts.returnHome.setEnabled(hasHome);
+        if (!hasHome) opts.returnHome.setText("打完自動跳回家（請先設定家）");
+        col.addView(opts.returnHome);
+        return col;
+    }
+
+    /** 讀取停留秒數（1～600），並記住作為下次預設值；格式錯誤回傳 -1。 */
+    private int readStaySec(StayOptions opts) {
+        try {
+            int sec = Integer.parseInt(opts.staySec.getText().toString().trim());
+            sec = Math.max(1, Math.min(600, sec));
+            dbHelper.setSetting(GpsMockDbHelper.KEY_MUSHROOM_STAY_SEC, String.valueOf(sec));
+            return sec;
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, "請輸入有效秒數", Toast.LENGTH_SHORT).show();
+            return -1;
+        }
+    }
+
+    private void showGoFightDialog(GpsMockDbHelper.FlowerPot m) {
+        StayOptions opts = new StayOptions();
+        new AlertDialog.Builder(this)
+                .setTitle("去打「" + m.name + "」")
+                .setView(buildStayOptionsView(opts))
+                .setPositiveButton("出發", (d, w) -> {
+                    int sec = readStaySec(opts);
+                    if (sec < 0) return;
+                    List<GpsMockDbHelper.FlowerPot> one = new java.util.ArrayList<>();
+                    one.add(m);
+                    startMushroomTour(one, sec, opts.returnHome.isChecked());
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showMushroomTourDialog() {
+        List<GpsMockDbHelper.FlowerPot> active = new java.util.ArrayList<>();
+        for (GpsMockDbHelper.FlowerPot m : dbHelper.getAllMushrooms()) {
+            if (!m.isExpired()) active.add(m);
+        }
+        if (active.isEmpty()) {
+            Toast.makeText(this, "沒有未過期的大菇可巡迴", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (GpsMockService.isRunning()) {
+            Toast.makeText(this, "請先停止目前的模擬", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        double[] home = getHome();
+        double[] start = home != null ? home : getReferencePosition();
+        List<GpsMockDbHelper.FlowerPot> ordered = sortByNearest(active, start);
+
+        StringBuilder order = new StringBuilder("順序：");
+        for (int i = 0; i < ordered.size(); i++) {
+            if (i > 0) order.append(" → ");
+            order.append(ordered.get(i).name);
+        }
+        StayOptions opts = new StayOptions();
+        LinearLayout view = buildStayOptionsView(opts);
+        TextView orderText = new TextView(this);
+        orderText.setText(order.toString());
+        orderText.setTextSize(12);
+        orderText.setTextColor(UIHelper.TEXT_HINT);
+        orderText.setPadding(0, UIHelper.dp(this, 8), 0, 0);
+        view.addView(orderText);
+
+        new AlertDialog.Builder(this)
+                .setTitle("巡迴 " + ordered.size() + " 個大菇")
+                .setView(view)
+                .setPositiveButton("開始巡迴", (d, w) -> {
+                    int sec = readStaySec(opts);
+                    if (sec < 0) return;
+                    startMushroomTour(ordered, sec, opts.returnHome.isChecked());
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 由起點開始，每次挑最近的下一朵（最近鄰排序），減少大跨度跳躍。start 為 null 時維持原順序。 */
+    private static List<GpsMockDbHelper.FlowerPot> sortByNearest(
+            List<GpsMockDbHelper.FlowerPot> src, double[] start) {
+        List<GpsMockDbHelper.FlowerPot> remaining = new java.util.ArrayList<>(src);
+        if (start == null) return remaining;
+        List<GpsMockDbHelper.FlowerPot> result = new java.util.ArrayList<>();
+        double lat = start[0], lng = start[1];
+        while (!remaining.isEmpty()) {
+            int best = 0;
+            double bestDist = Double.MAX_VALUE;
+            for (int i = 0; i < remaining.size(); i++) {
+                GpsMockDbHelper.FlowerPot m = remaining.get(i);
+                double dist = distanceMeters(lat, lng, m.lat, m.lng);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+            GpsMockDbHelper.FlowerPot next = remaining.remove(best);
+            result.add(next);
+            lat = next.lat;
+            lng = next.lng;
+        }
+        return result;
+    }
+
+    private void startMushroomTour(List<GpsMockDbHelper.FlowerPot> list, int staySec, boolean returnHome) {
+        double[] home = returnHome ? getHome() : null;
+        int n = list.size() + (home != null ? 1 : 0);
+        double[] lats = new double[n];
+        double[] lngs = new double[n];
+        long[] stayMs = new long[n];
+        for (int i = 0; i < list.size(); i++) {
+            lats[i] = list.get(i).lat;
+            lngs[i] = list.get(i).lng;
+            stayMs[i] = staySec * 1000L;
+        }
+        if (home != null) {
+            // 最後一點為家：到達後持續停留在家
+            lats[n - 1] = home[0];
+            lngs[n - 1] = home[1];
+            stayMs[n - 1] = 1000L;
+        }
+        startJumpTour(lats, lngs, stayMs);
+
+        String msg = list.size() == 1
+                ? String.format("前往「%s」停留 %d 秒%s", list.get(0).name, staySec, home != null ? "後回家" : "")
+                : String.format("開始巡迴 %d 個大菇（每朵 %d 秒）%s", list.size(), staySec, home != null ? "，完成後回家" : "");
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 
     // ===================== 步數寫入（Health Connect） =====================

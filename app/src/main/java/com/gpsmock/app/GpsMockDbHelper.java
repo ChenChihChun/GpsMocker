@@ -12,7 +12,7 @@ import java.util.List;
 public class GpsMockDbHelper extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "gpsmock.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
 
     public static final String TABLE_PRESETS = "presets";
     public static final String COL_ID = "id";
@@ -30,9 +30,15 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
     public static final String COL_ORIG_LNG = "orig_lng";
     public static final String COL_CATEGORY = "category";
     public static final String COL_CORRECTED = "corrected";
+    public static final String COL_EXPIRES_AT = "expires_at";
 
     public static final String CATEGORY_PERMANENT = "permanent";
     public static final String CATEGORY_EVENT = "event";
+    public static final String CATEGORY_MUSHROOM = "mushroom";
+
+    public static final String KEY_HOME_LAT = "home_lat";
+    public static final String KEY_HOME_LNG = "home_lng";
+    public static final String KEY_MUSHROOM_STAY_SEC = "mushroom_stay_sec";
 
     public GpsMockDbHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -63,6 +69,11 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         if (oldVersion < 3) {
             db.delete(TABLE_FLOWER_POTS, COL_CATEGORY + "=?", new String[]{CATEGORY_PERMANENT});
         }
+        // oldVersion < 2 時上面已用新 schema 建表（含 expires_at），不需再補欄位
+        if (oldVersion >= 2 && oldVersion < 4) {
+            db.execSQL("ALTER TABLE " + TABLE_FLOWER_POTS + " ADD COLUMN "
+                    + COL_EXPIRES_AT + " INTEGER NOT NULL DEFAULT 0");
+        }
     }
 
     private void createFlowerPotsTable(SQLiteDatabase db) {
@@ -75,6 +86,7 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
                 + COL_ORIG_LNG + " REAL NOT NULL, "
                 + COL_CATEGORY + " TEXT NOT NULL, "
                 + COL_CORRECTED + " INTEGER NOT NULL DEFAULT 0, "
+                + COL_EXPIRES_AT + " INTEGER NOT NULL DEFAULT 0, "
                 + COL_CREATED_AT + " INTEGER NOT NULL)");
     }
 
@@ -139,6 +151,11 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
     // ---- 金色花盆 ----
 
     public long insertFlowerPot(String name, double lat, double lng, String category) {
+        return insertFlowerPot(name, lat, lng, category, 0);
+    }
+
+    /** expiresAt：到期時間（epoch ms），0 表示不會到期。 */
+    public long insertFlowerPot(String name, double lat, double lng, String category, long expiresAt) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
         cv.put(COL_NAME, name);
@@ -148,6 +165,7 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         cv.put(COL_ORIG_LNG, lng);
         cv.put(COL_CATEGORY, category);
         cv.put(COL_CORRECTED, 0);
+        cv.put(COL_EXPIRES_AT, expiresAt);
         cv.put(COL_CREATED_AT, System.currentTimeMillis());
         return db.insert(TABLE_FLOWER_POTS, null, cv);
     }
@@ -156,8 +174,27 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_ID + "=?", new String[]{String.valueOf(id)});
     }
 
+    /** 刪除所有花盆（不含大菇）。 */
     public void deleteAllFlowerPots() {
-        getWritableDatabase().delete(TABLE_FLOWER_POTS, null, null);
+        getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_CATEGORY + "!=?", new String[]{CATEGORY_MUSHROOM});
+    }
+
+    public void deleteAllMushrooms() {
+        getWritableDatabase().delete(TABLE_FLOWER_POTS, COL_CATEGORY + "=?", new String[]{CATEGORY_MUSHROOM});
+    }
+
+    /** 刪除已到期的大菇，回傳刪除筆數。 */
+    public int deleteExpiredMushrooms() {
+        return getWritableDatabase().delete(TABLE_FLOWER_POTS,
+                COL_CATEGORY + "=? AND " + COL_EXPIRES_AT + ">0 AND " + COL_EXPIRES_AT + "<?",
+                new String[]{CATEGORY_MUSHROOM, String.valueOf(System.currentTimeMillis())});
+    }
+
+    /** 更新大菇到期時間（epoch ms，0 表示不會到期）。 */
+    public void setExpiresAt(long id, long expiresAt) {
+        ContentValues cv = new ContentValues();
+        cv.put(COL_EXPIRES_AT, expiresAt);
+        getWritableDatabase().update(TABLE_FLOWER_POTS, cv, COL_ID + "=?", new String[]{String.valueOf(id)});
     }
 
     /** 修正花盆座標：更新 lat/lng 並標記為已修正，保留原始座標供復原。 */
@@ -180,13 +217,22 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
                 new Object[]{id});
     }
 
-    /** 取得所有花盆：常駐在前、活動在後，各依建立時間排序。 */
+    /** 取得所有花盆（不含大菇）：常駐在前、活動在後，各依建立時間排序。 */
     public List<FlowerPot> getAllFlowerPots() {
-        List<FlowerPot> list = new ArrayList<>();
-        SQLiteDatabase db = getReadableDatabase();
         String orderBy = "CASE " + COL_CATEGORY + " WHEN '" + CATEGORY_PERMANENT
                 + "' THEN 0 ELSE 1 END ASC, " + COL_CREATED_AT + " ASC";
-        try (Cursor c = db.query(TABLE_FLOWER_POTS, null, null, null, null, null, orderBy)) {
+        return queryFlowerPots(COL_CATEGORY + "!=?", new String[]{CATEGORY_MUSHROOM}, orderBy);
+    }
+
+    /** 取得所有大菇，依建立時間排序。 */
+    public List<FlowerPot> getAllMushrooms() {
+        return queryFlowerPots(COL_CATEGORY + "=?", new String[]{CATEGORY_MUSHROOM}, COL_CREATED_AT + " ASC");
+    }
+
+    private List<FlowerPot> queryFlowerPots(String selection, String[] args, String orderBy) {
+        List<FlowerPot> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        try (Cursor c = db.query(TABLE_FLOWER_POTS, null, selection, args, null, null, orderBy)) {
             while (c.moveToNext()) {
                 FlowerPot p = new FlowerPot();
                 p.id = c.getLong(c.getColumnIndexOrThrow(COL_ID));
@@ -197,6 +243,7 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
                 p.origLng = c.getDouble(c.getColumnIndexOrThrow(COL_ORIG_LNG));
                 p.category = c.getString(c.getColumnIndexOrThrow(COL_CATEGORY));
                 p.corrected = c.getInt(c.getColumnIndexOrThrow(COL_CORRECTED)) != 0;
+                p.expiresAt = c.getLong(c.getColumnIndexOrThrow(COL_EXPIRES_AT));
                 list.add(p);
             }
         }
@@ -212,5 +259,10 @@ public class GpsMockDbHelper extends SQLiteOpenHelper {
         public double origLng;
         public String category;
         public boolean corrected;
+        public long expiresAt;
+
+        public boolean isExpired() {
+            return expiresAt > 0 && expiresAt < System.currentTimeMillis();
+        }
     }
 }
