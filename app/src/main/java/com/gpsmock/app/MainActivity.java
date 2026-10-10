@@ -3,6 +3,7 @@ package com.gpsmock.app;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -1669,7 +1670,8 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         content.addView(UIHelper.sectionHeader(this, "皮克敏菇點"));
 
         TextView hint = new TextView(this);
-        hint.setText("菇點是固定的，大菇隨機長在菇點上。\n"
+        hint.setText("最快：在菇點地圖網站（例如 treelazy）複製大菇座標，切回本 App 會自動跳出「去打」。\n"
+                + "菇點是固定的，大菇隨機長在菇點上。\n"
                 + "1. 走到或模擬到菇點附近，按「記錄目前位置」（模擬中也可按通知上的「記錄菇點」）\n"
                 + "2. 按「巡邏菇點」逐一查看，看到大菇時拉下通知按「標記大菇」，巡邏會暫停讓你加入，再按「繼續」\n"
                 + "3. 點菇點名稱可手動標記/取消大菇");
@@ -1704,6 +1706,15 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
         recordBtn.setLayoutParams(recLp);
         recordBtn.setOnClickListener(v -> recordCurrentSpot());
         content.addView(recordBtn);
+
+        Button clipBtn = UIHelper.primaryButton(this, "貼上剪貼簿座標去打");
+        clipBtn.setBackground(UIHelper.roundRect(UIHelper.ACCENT_BLUE, 14, this));
+        LinearLayout.LayoutParams clipLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clipLp.setMargins(0, UIHelper.dp(this, 8), 0, 0);
+        clipBtn.setLayoutParams(clipLp);
+        clipBtn.setOnClickListener(v -> checkClipboardForCoords(true));
+        content.addView(clipBtn);
 
         LinearLayout btnRow = new LinearLayout(this);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -2078,6 +2089,123 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
             });
         }
         b.show();
+    }
+
+    // ---- 剪貼簿座標（從菇點地圖網站複製座標後切回 App） ----
+
+    private String lastClipText; // 已處理過的剪貼簿內容，避免重複詢問
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Android 10+ 只有取得焦點的 App 能讀剪貼簿，所以在這裡而非 onResume 讀取
+        if (hasFocus) {
+            checkClipboardForCoords(false);
+        }
+    }
+
+    /** 讀取剪貼簿；含座標時詢問要去打或儲存。manual=true 時即使處理過也再問一次。 */
+    private void checkClipboardForCoords(boolean manual) {
+        String text = null;
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip().getItemCount() > 0) {
+                CharSequence cs = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+                if (cs != null) text = cs.toString().trim();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Read clipboard failed: " + e.getMessage());
+        }
+        if (text == null || text.isEmpty() || text.length() > 500) {
+            if (manual) Toast.makeText(this, "剪貼簿沒有座標", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!manual && text.equals(lastClipText)) return;
+        double[] ll = parseLatLng(text);
+        if (ll == null) {
+            if (manual) Toast.makeText(this, "剪貼簿沒有座標", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        lastClipText = text;
+        String label = text.replaceAll("-?\\d{1,3}\\.\\d+", "").replaceAll("[,;|\\s]+", " ").trim();
+        showClipCoordsDialog(ll, label);
+    }
+
+    private void showClipCoordsDialog(double[] ll, String label) {
+        selectTab(2);
+        GpsMockDbHelper.FlowerPot existing = findNearbySpot(ll[0], ll[1], 30);
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = UIHelper.dp(this, 16);
+        col.setPadding(p, UIHelper.dp(this, 8), p, 0);
+
+        TextView info = new TextView(this);
+        double[] ref = getReferencePosition();
+        String dist = ref != null ? "，距離 " + formatDistance(distanceMeters(ref[0], ref[1], ll[0], ll[1])) : "";
+        info.setText(String.format("%.6f, %.6f%s", ll[0], ll[1], dist)
+                + (existing != null ? "\n（已存在菇點「" + existing.name + "」）" : ""));
+        info.setTextColor(UIHelper.TEXT_SECONDARY);
+        col.addView(info);
+
+        EditText nameInput = new EditText(this);
+        nameInput.setHint("名稱（可留空）");
+        if (existing != null) {
+            nameInput.setText(existing.name);
+        } else if (!label.isEmpty()) {
+            nameInput.setText(label);
+        }
+        col.addView(nameInput);
+
+        new AlertDialog.Builder(this)
+                .setTitle("偵測到剪貼簿座標")
+                .setView(col)
+                .setPositiveButton("去打", (d, w) -> {
+                    GpsMockDbHelper.FlowerPot spot = saveClipSpot(ll, nameInput.getText().toString(), existing);
+                    showGoFightDialog(spot);
+                })
+                .setNeutralButton("只存成大菇", (d, w) -> {
+                    saveClipSpot(ll, nameInput.getText().toString(), existing);
+                    Toast.makeText(this, "已存成大菇", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 儲存（或沿用附近既有的）菇點並標記為大菇，回傳該菇點。 */
+    private GpsMockDbHelper.FlowerPot saveClipSpot(double[] ll, String name,
+                                                    GpsMockDbHelper.FlowerPot existing) {
+        long expiresAt = System.currentTimeMillis() + Math.round(getBigHours() * 3600_000);
+        GpsMockDbHelper.FlowerPot spot;
+        if (existing != null) {
+            spot = existing;
+        } else {
+            String nm = name.trim();
+            if (nm.isEmpty()) nm = String.format("大菇 %.4f, %.4f", ll[0], ll[1]);
+            spot = new GpsMockDbHelper.FlowerPot();
+            spot.id = dbHelper.insertFlowerPot(nm, ll[0], ll[1], GpsMockDbHelper.CATEGORY_MUSHROOM);
+            spot.name = nm;
+            spot.lat = ll[0];
+            spot.lng = ll[1];
+        }
+        dbHelper.setExpiresAt(spot.id, expiresAt);
+        spot.expiresAt = expiresAt;
+        loadMushrooms();
+        return spot;
+    }
+
+    /** 找出 radiusM 公尺內最近的菇點，沒有回傳 null。 */
+    private GpsMockDbHelper.FlowerPot findNearbySpot(double lat, double lng, double radiusM) {
+        GpsMockDbHelper.FlowerPot best = null;
+        double bestDist = radiusM;
+        for (GpsMockDbHelper.FlowerPot m : dbHelper.getAllMushrooms()) {
+            double dist = distanceMeters(lat, lng, m.lat, m.lng);
+            if (dist <= bestDist) {
+                bestDist = dist;
+                best = m;
+            }
+        }
+        return best;
     }
 
     // ---- 巡邏 / 去打 ----
